@@ -4,6 +4,7 @@ import "blockchain-monitor/internal/models"
 
 // BlockchainMonitor defines the interface for blockchain monitoring
 type BlockchainMonitor interface {
+	Start(emitter EventEmitter) error
 	// Initialize sets up the blockchain client
 	Initialize() error
 

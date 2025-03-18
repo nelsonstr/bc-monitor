@@ -8,19 +8,17 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
 
 type BitcoinMonitor struct {
-	client       *http.Client
-	RpcEndpoint  string
-	ApiKey       string
-	latestBlock  string
-	EventEmitter interfaces.EventEmitter
-	Addresses    []string
-	MaxRetries   int
-	RetryDelay   time.Duration
+	BaseMonitor
+	client      *http.Client
+	latestBlock string
+	MaxRetries  int
+	RetryDelay  time.Duration
 }
 
 func (b *BitcoinMonitor) Initialize() error {
@@ -270,4 +268,31 @@ func (b *BitcoinMonitor) GetChainName() string {
 
 func (b *BitcoinMonitor) GetExplorerURL(txHash string) string {
 	return fmt.Sprintf("https://blockchair.com/bitcoin/transaction/%s", txHash)
+}
+
+func NewBitcoinMonitor() *BitcoinMonitor {
+	return &BitcoinMonitor{
+		BaseMonitor: BaseMonitor{
+			RpcEndpoint: os.Getenv("BITCOIN_RPC_ENDPOINT"),
+			ApiKey:      os.Getenv("BLOCKDAEMON_API_KEY"),
+			Addresses:   []string{"bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh"},
+		},
+		MaxRetries: 2,
+		RetryDelay: 2 * time.Second,
+	}
+}
+
+func (b *BitcoinMonitor) Start(emitter interfaces.EventEmitter) error {
+	b.EventEmitter = emitter
+	// Initialize Bitcoin monitor
+	if err := b.Initialize(); err != nil {
+		log.Fatalf("Failed to initialize Bitcoin monitor: %v", err)
+		return err
+	}
+	// Start monitoring Bitcoin blockchain
+	if err := b.StartMonitoring(); err != nil {
+		log.Fatalf("Failed to start Bitcoin monitoring: %v", err)
+		return err
+	}
+	return nil
 }

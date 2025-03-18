@@ -9,18 +9,16 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
 
 // SolanaMonitor implements BlockchainMonitor for Solana
 type SolanaMonitor struct {
-	client       *http.Client
-	RpcEndpoint  string
-	latestSlot   uint64
-	EventEmitter interfaces.EventEmitter
-	Addresses    []string
-	ApiKey       string
+	BaseMonitor
+	client     *http.Client
+	latestSlot uint64
 }
 
 type SolanaRpcRequest struct {
@@ -503,4 +501,28 @@ func (s *SolanaMonitor) getRecentTransactionDetails(address string) (Transaction
 		TxHash:    signaturesResp[0].Signature,
 		Timestamp: time.Unix(signaturesResp[0].BlockTime, 0),
 	}, nil
+}
+
+func NewSolanaMonitor() *SolanaMonitor {
+	return &SolanaMonitor{
+		BaseMonitor: BaseMonitor{
+			RpcEndpoint: os.Getenv("SOLANA_RPC_ENDPOINT"),
+			ApiKey:      os.Getenv("BLOCKDAEMON_API_KEY"),
+			Addresses:   []string{"oQPnhXAbLbMuKHESaGrbXT17CyvWCpLyERSJA9HCYd7"},
+		},
+	}
+}
+
+func (s *SolanaMonitor) Start(emitter interfaces.EventEmitter) error {
+	s.EventEmitter = emitter
+	// Initialize Solana monitor
+	if err := s.Initialize(); err != nil {
+		log.Fatalf("Failed to initialize Solana monitor: %v", err)
+	}
+	// Start monitoring Solana blockchain
+	if err := s.StartMonitoring(); err != nil {
+		log.Fatalf("Failed to start Solana monitoring: %v", err)
+		return err
+	}
+	return nil
 }

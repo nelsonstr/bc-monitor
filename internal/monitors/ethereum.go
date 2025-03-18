@@ -8,6 +8,7 @@ import (
 	"log"
 	"math/big"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -17,16 +18,14 @@ import (
 	"github.com/ethereum/go-ethereum/rpc"
 )
 
+// EthereumMonitor implements BlockchainMonitor for Start
 // EthereumMonitor implements BlockchainMonitor for Ethereum
 type EthereumMonitor struct {
-	client       *ethclient.Client
-	ApiKey       string
-	RpcEndpoint  string
-	latestBlock  uint64
-	EventEmitter interfaces.EventEmitter
-	Addresses    []string
-	MaxRetries   int
-	RetryDelay   time.Duration
+	BaseMonitor
+	client      *ethclient.Client
+	latestBlock uint64
+	MaxRetries  int
+	RetryDelay  time.Duration
 }
 
 func (e *EthereumMonitor) Initialize() error {
@@ -87,7 +86,7 @@ func (e *EthereumMonitor) StartMonitoring() error {
 	// Get the latest block number
 	latestBlock, err := e.client.BlockNumber(context.Background())
 	if err != nil {
-		return fmt.Errorf("failed to get latest Ethereum block: %v\n", err)
+		return fmt.Errorf("failed to get latest Start block: %v\n", err)
 	}
 
 	e.latestBlock = latestBlock
@@ -98,7 +97,7 @@ func (e *EthereumMonitor) StartMonitoring() error {
 			// Get the current block number
 			currentBlock, err := e.client.BlockNumber(context.Background())
 			if err != nil {
-				log.Printf("Failed to get current Ethereum block: %v\n", err)
+				log.Printf("Failed to get current Start block: %v\n", err)
 				time.Sleep(5 * time.Second)
 				continue
 			}
@@ -267,4 +266,34 @@ func (e *EthereumMonitor) getBalance(address string) (*big.Int, uint64, error) {
 	}
 
 	return balance, blockNumber, nil
+}
+
+func NewEthereumMonitor() *EthereumMonitor {
+	return &EthereumMonitor{
+		BaseMonitor: BaseMonitor{
+			RpcEndpoint: os.Getenv("ETHEREUM_RPC_ENDPOINT"),
+			ApiKey:      os.Getenv("BLOCKDAEMON_API_KEY"),
+			Addresses:   []string{"0x00000000219ab540356cBB839Cbe05303d7705Fa"},
+		},
+
+		MaxRetries: 5,
+		RetryDelay: 5 * time.Second,
+	}
+}
+
+func (e *EthereumMonitor) Start(emitter interfaces.EventEmitter) error {
+	// Set the EventEmitter
+	e.EventEmitter = emitter
+
+	// Initialize Start monitor
+	if err := e.Initialize(); err != nil {
+		log.Fatalf("Failed to initialize Start monitor: %v", err)
+		return err
+	}
+	// Start monitoring Start blockchain
+	if err := e.StartMonitoring(); err != nil {
+		log.Fatalf("Failed to start Start monitoring: %v", err)
+		return err
+	}
+	return nil
 }
