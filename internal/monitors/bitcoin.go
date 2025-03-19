@@ -54,6 +54,11 @@ func (b *BitcoinMonitor) getBestBlockHash() (string, error) {
 }
 
 func (b *BitcoinMonitor) makeRPCCall(method string, params []interface{}) (string, error) {
+	//Wait for rate limit
+	if err := b.rateLimiter.Wait(context.Background()); err != nil {
+		log.Printf("Rate limit error: %v\n", err)
+		return "", fmt.Errorf("rate limit error: %v", err)
+	}
 	payload, err := json.Marshal(map[string]interface{}{
 		"jsonrpc": "2.0",
 		"id":      "test",
@@ -130,7 +135,7 @@ func (b *BitcoinMonitor) makeRPCCall(method string, params []interface{}) (strin
 	})
 
 	if err != nil {
-		log.Printf("RPC call to method %s failed: %v\nResponse body: %s\n", method, err, string(responseBody))
+		log.Printf("BITCOIN - RPC call to method %s failed: %v\nResponse body: %s\n", method, err, string(responseBody))
 	}
 
 	return result, err
@@ -214,10 +219,6 @@ func (b *BitcoinMonitor) processBlock(blockHash string) (int64, error) {
 }
 
 func (b *BitcoinMonitor) processTransaction(txHash string) error {
-	//Wait for rate limit
-	if err := b.rateLimiter.Wait(context.Background()); err != nil {
-		return fmt.Errorf("rate limit error: %v", err)
-	}
 
 	txDetails, err := b.getTransaction(txHash)
 	if err != nil {
@@ -347,7 +348,7 @@ func NewBitcoinMonitor() *BitcoinMonitor {
 		},
 		MaxRetries:  2,
 		RetryDelay:  2 * time.Second,
-		rateLimiter: rate.NewLimiter(rate.Every(time.Second), 100), // 100 requests per second
+		rateLimiter: rate.NewLimiter(rate.Every(time.Second), 40), // 100 requests per second
 	}
 }
 
