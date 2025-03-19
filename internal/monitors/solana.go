@@ -2,13 +2,13 @@ package monitors
 
 import (
 	"blockchain-monitor/internal/interfaces"
+	"blockchain-monitor/internal/logger"
 	"blockchain-monitor/internal/models"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -81,7 +81,9 @@ func (s *SolanaMonitor) Initialize() error {
 	}
 
 	s.latestSlot = slot
-	log.Printf("Successfully connected to Solana RPC, latest slot: %d", slot)
+	logger.Log.Info().
+		Int("addressCount", len(s.Addresses)).
+		Msg("Starting Solana monitoring")
 	return nil
 }
 
@@ -90,7 +92,9 @@ func (s *SolanaMonitor) GetChainName() string {
 }
 
 func (s *SolanaMonitor) StartMonitoring() error {
-	log.Printf("Starting %s monitoring for %d addresses", s.GetChainName(), len(s.Addresses))
+	logger.Log.Info().
+		Int("addressCount", len(s.Addresses)).
+		Msg("Starting Solana monitoring")
 
 	// Start polling for each address
 	for _, address := range s.Addresses {
@@ -124,7 +128,9 @@ func (s *SolanaMonitor) pollAccountChanges(address string) {
 		})
 
 		if err != nil {
-			log.Printf("Error creating account info request: %v", err)
+			logger.Log.Error().
+				Err(err).
+				Msg("Error creating account info request")
 			time.Sleep(backoff)
 			backoff = minDuration(backoff*2, maxBackoff)
 			continue
@@ -133,7 +139,9 @@ func (s *SolanaMonitor) pollAccountChanges(address string) {
 		// Create HTTP request
 		req, err := http.NewRequest("POST", s.RpcEndpoint, bytes.NewBuffer(reqBody))
 		if err != nil {
-			log.Printf("Error creating HTTP request: %v", err)
+			logger.Log.Error().
+				Err(err).
+				Msg("Error creating HTTP request")
 			time.Sleep(backoff)
 			backoff = min(backoff*2, maxBackoff)
 			continue
@@ -149,7 +157,9 @@ func (s *SolanaMonitor) pollAccountChanges(address string) {
 		client := &http.Client{Timeout: 10 * time.Second}
 		resp, err := client.Do(req)
 		if err != nil {
-			log.Printf("Error sending HTTP request: %v", err)
+			logger.Log.Error().
+				Err(err).
+				Msg("Error sending HTTP request")
 			time.Sleep(backoff)
 			backoff = min(backoff*2, maxBackoff)
 			continue
@@ -159,7 +169,9 @@ func (s *SolanaMonitor) pollAccountChanges(address string) {
 		body, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if err != nil {
-			log.Printf("Error reading response body: %v", err)
+			logger.Log.Error().
+				Err(err).
+				Msg("Error reading response body")
 			time.Sleep(backoff)
 			backoff = min(backoff*2, maxBackoff)
 			continue
@@ -175,7 +187,9 @@ func (s *SolanaMonitor) pollAccountChanges(address string) {
 		}
 
 		if err := json.Unmarshal(body, &response); err != nil {
-			log.Printf("Error parsing response: %v", err)
+			logger.Log.Error().
+				Err(err).
+				Msg("Error parsing response")
 			time.Sleep(backoff)
 			backoff = min(backoff*2, maxBackoff)
 			continue
@@ -191,7 +205,9 @@ func (s *SolanaMonitor) pollAccountChanges(address string) {
 				// Fetch recent transactions to get details
 				txDetails, err := s.getRecentTransactionDetails(address)
 				if err != nil {
-					log.Printf("Error fetching transaction details: %v", err)
+					logger.Log.Error().
+						Err(err).
+						Msg("Error fetching transaction details")
 				}
 
 				// Determine if it's incoming or outgoing
@@ -206,7 +222,6 @@ func (s *SolanaMonitor) pollAccountChanges(address string) {
 				}
 
 				// Create transaction event
-				// Create transaction event
 				event := models.TransactionEvent{
 					From:      source,
 					To:        destination,
@@ -218,21 +233,23 @@ func (s *SolanaMonitor) pollAccountChanges(address string) {
 				}
 
 				// Print DB storage values
-				log.Printf("DB STORAGE VALUES:")
-				log.Printf("  Chain:       %s", event.Chain)
-				log.Printf("  From:      %s", event.From)
-				log.Printf("  To: %s", event.To)
-				log.Printf("  Amount:      %s SOL", event.Amount)
-				log.Printf("  Fees:        %s SOL", event.Fees)
-				log.Printf("  TxHash:      %s", event.TxHash)
-				log.Printf("  Timestamp:   %s", event.Timestamp.Format(time.RFC3339))
-				log.Printf("  Raw Balance: %d -> %d (change: %d lamports)",
-					lastKnownBalance, currentBalance, balanceChange)
+				logger.Log.Info().
+					Str("chain", event.Chain).
+					Str("from", event.From).
+					Str("to", event.To).
+					Str("amount", event.Amount).
+					Str("fees", event.Fees).
+					Str("txHash", event.TxHash).
+					Time("timestamp", event.Timestamp).
+					Msg("DB STORAGE VALUES")
 
 				s.EventEmitter.EmitEvent(event)
 			} else {
-				log.Printf("Initial balance for %s: %d lamports (%.9f SOL)",
-					address, currentBalance, float64(currentBalance)/1000000000)
+				logger.Log.Info().
+					Str("address", address).
+					Uint64("balance", currentBalance).
+					Float64("balanceSOL", float64(currentBalance)/1000000000).
+					Msg("Initial balance")
 			}
 
 			lastKnownBalance = currentBalance
@@ -386,7 +403,9 @@ func (s *SolanaMonitor) processTransaction(tx SolanaTransaction, watchAddresses 
 					}
 				}
 
-				log.Printf("Detected outgoing transaction from watched address %s\n", account)
+				logger.Log.Info().
+					Str("address", account).
+					Msg("Detected outgoing transaction from watched address")
 			} else {
 				// This account is likely a receiver
 				destination = account
@@ -403,7 +422,9 @@ func (s *SolanaMonitor) processTransaction(tx SolanaTransaction, watchAddresses 
 					}
 				}
 
-				log.Printf("Detected incoming transaction to watched address %s\n", account)
+				logger.Log.Info().
+					Str("address", account).
+					Msg("Detected incoming transaction to watched address")
 			}
 
 			// Create and emit event
@@ -518,17 +539,17 @@ func (s *SolanaMonitor) Start(ctx context.Context, emitter interfaces.EventEmitt
 	for {
 		select {
 		case <-ctx.Done():
-			log.Printf("%s monitor shutting down", s.GetChainName())
+			logger.Log.Info().Msg("Solana monitor shutting down")
 			return nil
 		default:
 			s.EventEmitter = emitter
-			// Initialize Solana monitor
+
 			if err := s.Initialize(); err != nil {
-				log.Fatalf("Failed to initialize Solana monitor: %v", err)
+				logger.Log.Fatal().Err(err).Msg("Failed to initialize Solana monitor")
+				return err
 			}
-			// Start monitoring Solana blockchain
 			if err := s.StartMonitoring(); err != nil {
-				log.Fatalf("Failed to start Solana monitoring: %v", err)
+				logger.Log.Fatal().Err(err).Msg("Failed to start Solana monitoring")
 				return err
 			}
 			return nil

@@ -2,9 +2,8 @@ package events
 
 import (
 	"blockchain-monitor/internal/interfaces"
+	"blockchain-monitor/internal/logger"
 	"blockchain-monitor/internal/models"
-	"log"
-	"time"
 )
 
 // PrintEmitter wraps another emitter and prints DB storage values
@@ -16,20 +15,27 @@ type PrintEmitter struct {
 // EmitEvent prints DB storage values and forwards to the wrapped emitter
 func (d *PrintEmitter) EmitEvent(event models.TransactionEvent) error {
 	// Print DB storage values
-	log.Printf("DB STORAGE VALUES (%s):", event.Chain)
-	log.Printf("  Chain:       %s", event.Chain)
-	log.Printf("  From:      %s", event.From)
-	log.Printf("  To: %s", event.To)
-	log.Printf("  Amount:      %s", event.Amount)
-	log.Printf("  Fees:        %s", event.Fees)
-	log.Printf("  TxHash:      %s", event.TxHash)
-	log.Printf("  Timestamp:   %s", event.Timestamp.Format(time.RFC3339))
+	logger.Log.Info().
+		Str("chain", event.Chain).
+		Msg("DB STORAGE VALUES")
 
-	// Print Start-specific information if applicable
+	logger.Log.Info().
+		Str("chain", event.Chain).
+		Str("from", event.From).
+		Str("to", event.To).
+		Str("amount", event.Amount).
+		Str("fees", event.Fees).
+		Str("txHash", event.TxHash).
+		Time("timestamp", event.Timestamp).
+		Msg("Transaction details")
+
 	// Print chain-specific information
 	if monitor, ok := d.Monitors[event.Chain]; ok {
-		log.Printf("  Network:     %s mainnet", event.Chain)
-		log.Printf("  Explorer:    %s", monitor.GetExplorerURL(event.TxHash))
+		logger.Log.Info().
+			Str("chain", event.Chain).
+			Str("network", "mainnet").
+			Str("explorer", monitor.GetExplorerURL(event.TxHash)).
+			Msg("Chain-specific information")
 	}
 
 	// Forward to wrapped emitter

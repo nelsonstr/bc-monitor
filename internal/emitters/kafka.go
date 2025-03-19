@@ -1,10 +1,10 @@
 package emitters
 
 import (
+	"blockchain-monitor/internal/logger"
 	"blockchain-monitor/internal/models"
 	"context"
 	"fmt"
-	"log"
 
 	"github.com/segmentio/kafka-go"
 )
@@ -31,7 +31,10 @@ func (k *KafkaEmitter) EmitEvent(event models.TransactionEvent) error {
 		return fmt.Errorf("failed to write message to Kafka: %v", err)
 	}
 
-	log.Printf("Successfully emitted %s event to Kafka: %s", event.Chain, event.TxHash)
+	logger.Log.Info().
+		Str("chain", event.Chain).
+		Str("txHash", event.TxHash).
+		Msg("Successfully emitted event to Kafka")
 	return nil
 }
 

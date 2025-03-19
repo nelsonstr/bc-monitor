@@ -4,10 +4,10 @@ import (
 	"blockchain-monitor/internal/emitters"
 	"blockchain-monitor/internal/events"
 	"blockchain-monitor/internal/interfaces"
+	"blockchain-monitor/internal/logger"
 	"blockchain-monitor/internal/monitors"
 	"context"
 	"github.com/joho/godotenv"
-	"log"
 	"os"
 	"os/signal"
 	"sync"
@@ -16,8 +16,10 @@ import (
 )
 
 func main() {
+	logger.Init("info") // Initialize zerolog
+
 	if err := godotenv.Load(); err != nil {
-		log.Fatal("Error loading .env file")
+		logger.Log.Fatal().Err(err).Msg("Error loading .env file")
 	}
 
 	// Create a context that we can cancel
@@ -40,8 +42,8 @@ func main() {
 		WrappedEmitter: kafkaEmitter,
 		Monitors: map[string]interfaces.BlockchainMonitor{
 			ethereumMonitor.GetChainName(): ethereumMonitor,
-			//bitcoinMonitor.GetChainName(): bitcoinMonitor,
-			//solanaMonitor.GetChainName(): solanaMonitor,
+			bitcoinMonitor.GetChainName():  bitcoinMonitor,
+			solanaMonitor.GetChainName():   solanaMonitor,
 		},
 	}
 
@@ -55,7 +57,7 @@ func main() {
 		go func(m interfaces.BlockchainMonitor) {
 			defer wg.Done()
 			if err := m.Start(ctx, printEmitter); err != nil {
-				log.Printf("Error starting monitoring for %s: %v", m.GetChainName(), err)
+				logger.Log.Error().Err(err).Str("chain", m.GetChainName()).Msg("Error starting monitoring")
 			}
 		}(monitor)
 	}
@@ -70,7 +72,7 @@ func main() {
 
 	// Wait for interrupt signal
 	<-sigChan
-	log.Println("Received shutdown signal. Initiating graceful shutdown...")
+	logger.Log.Info().Msg("Received shutdown signal. Initiating graceful shutdown...")
 
 	// Cancel the context to signal all goroutines to stop
 	cancel()
@@ -84,15 +86,15 @@ func main() {
 
 	select {
 	case <-waitChan:
-		log.Println("All monitors have shut down gracefully")
+		logger.Log.Info().Msg("All monitors have shut down gracefully")
 	case <-time.After(30 * time.Second):
-		log.Println("Shutdown timed out after 30 seconds")
+		logger.Log.Warn().Msg("Shutdown timed out after 30 seconds")
 	}
 
 	// Perform any necessary cleanup
 	if err := kafkaEmitter.Close(); err != nil {
-		log.Printf("Error closing Kafka emitter: %v", err)
+		logger.Log.Error().Err(err).Msg("Error closing Kafka emitter")
 	}
 
-	log.Println("Shutdown complete")
+	logger.Log.Info().Msg("Shutdown complete")
 }
