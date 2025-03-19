@@ -59,6 +59,7 @@ func (b *BitcoinMonitor) makeRPCCall(method string, params []interface{}) (strin
 		log.Printf("Rate limit error: %v\n", err)
 		return "", fmt.Errorf("rate limit error: %v", err)
 	}
+
 	payload, err := json.Marshal(map[string]interface{}{
 		"jsonrpc": "2.0",
 		"id":      "test",
@@ -69,6 +70,7 @@ func (b *BitcoinMonitor) makeRPCCall(method string, params []interface{}) (strin
 		return "", fmt.Errorf("failed to marshal JSON payload: %v", err)
 	}
 
+	log.Printf("Making RPC call: %+v\n", string(payload))
 	req, err := http.NewRequest("POST", b.RpcEndpoint, strings.NewReader(string(payload)))
 	if err != nil {
 		return "", fmt.Errorf("failed to create HTTP request: %v", err)
@@ -156,6 +158,8 @@ func (b *BitcoinMonitor) StartMonitoring() error {
 
 	log.Printf("Starting %s monitoring using RPC endpoint: %s\n", b.GetChainName(), b.RpcEndpoint)
 	log.Printf("Latest %s block hash: %s\n", b.GetChainName(), b.latestBlockHash)
+
+	b.processBlock(b.latestBlockHash) // to remove
 
 	time.Sleep(5 * time.Second)
 
@@ -340,15 +344,22 @@ func (b *BitcoinMonitor) GetExplorerURL(txHash string) string {
 }
 
 func NewBitcoinMonitor() *BitcoinMonitor {
+	rlRaw := os.Getenv("RATE_LIMIT")
+	rateLimit, err := strconv.Atoi(rlRaw)
+	if err != nil || rateLimit <= 0 {
+		rateLimit = 4
+	}
+	log.Printf("Rate limit set to %d per second", rateLimit)
 	return &BitcoinMonitor{
 		BaseMonitor: BaseMonitor{
 			RpcEndpoint: os.Getenv("BITCOIN_RPC_ENDPOINT"),
-			ApiKey:      os.Getenv("BLOCKDAEMON_API_KEY"),
+			ApiKey:      os.Getenv("BITCOIN_API_KEY"),
 			Addresses:   []string{"bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh"},
 		},
-		MaxRetries:  2,
-		RetryDelay:  2 * time.Second,
-		rateLimiter: rate.NewLimiter(rate.Every(time.Second), 40), // 100 requests per second
+		MaxRetries: 1,
+		RetryDelay: 2 * time.Second,
+		// Create a rate limiter that allows 4 operations per second with a burst of 1. - max 5 RPS
+		rateLimiter: rate.NewLimiter(rate.Limit(rateLimit), 1),
 	}
 }
 

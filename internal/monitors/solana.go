@@ -508,7 +508,7 @@ func NewSolanaMonitor() *SolanaMonitor {
 	return &SolanaMonitor{
 		BaseMonitor: BaseMonitor{
 			RpcEndpoint: os.Getenv("SOLANA_RPC_ENDPOINT"),
-			ApiKey:      os.Getenv("BLOCKDAEMON_API_KEY"),
+			ApiKey:      os.Getenv("SOLANA_API_KEY"),
 			Addresses:   []string{"oQPnhXAbLbMuKHESaGrbXT17CyvWCpLyERSJA9HCYd7"},
 		},
 	}

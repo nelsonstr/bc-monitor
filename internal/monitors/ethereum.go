@@ -272,7 +272,7 @@ func NewEthereumMonitor() *EthereumMonitor {
 	return &EthereumMonitor{
 		BaseMonitor: BaseMonitor{
 			RpcEndpoint: os.Getenv("ETHEREUM_RPC_ENDPOINT"),
-			ApiKey:      os.Getenv("BLOCKDAEMON_API_KEY"),
+			ApiKey:      os.Getenv("ETHEREUM_API_KEY"),
 			Addresses:   []string{"0x00000000219ab540356cBB839Cbe05303d7705Fa"},
 		},
 
