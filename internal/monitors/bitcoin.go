@@ -159,8 +159,6 @@ func (b *BitcoinMonitor) StartMonitoring() error {
 	log.Printf("Starting %s monitoring using RPC endpoint: %s\n", b.GetChainName(), b.RpcEndpoint)
 	log.Printf("Latest %s block hash: %s\n", b.GetChainName(), b.latestBlockHash)
 
-	b.processBlock(b.latestBlockHash) // to remove
-
 	time.Sleep(5 * time.Second)
 
 	go b.monitorBlocks()
@@ -214,6 +212,7 @@ func (b *BitcoinMonitor) processBlock(blockHash string) (int64, error) {
 	log.Printf("Processing Bitcoin block %s with %d transactions\n", blockHash, len(block.Tx))
 
 	for _, tx := range block.Tx {
+
 		if err := b.processTransaction(tx); err != nil {
 			log.Printf("Error processing transaction %s: %v\n", tx, err)
 		}

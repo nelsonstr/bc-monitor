@@ -39,8 +39,8 @@ func main() {
 	printEmitter := &events.PrintEmitter{
 		WrappedEmitter: kafkaEmitter,
 		Monitors: map[string]interfaces.BlockchainMonitor{
-			//ethereumMonitor.GetChainName(): ethereumMonitor,
-			bitcoinMonitor.GetChainName(): bitcoinMonitor,
+			ethereumMonitor.GetChainName(): ethereumMonitor,
+			//bitcoinMonitor.GetChainName(): bitcoinMonitor,
 			//solanaMonitor.GetChainName(): solanaMonitor,
 		},
 	}
@@ -51,7 +51,7 @@ func main() {
 	// Start monitoring for each blockchain
 	for _, monitor := range printEmitter.Monitors {
 		wg.Add(1)
-		time.After(time.Second)
+
 		go func(m interfaces.BlockchainMonitor) {
 			defer wg.Done()
 			if err := m.Start(ctx, printEmitter); err != nil {

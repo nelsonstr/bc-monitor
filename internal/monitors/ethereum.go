@@ -276,8 +276,8 @@ func NewEthereumMonitor() *EthereumMonitor {
 			Addresses:   []string{"0x00000000219ab540356cBB839Cbe05303d7705Fa"},
 		},
 
-		MaxRetries: 5,
-		RetryDelay: 5 * time.Second,
+		MaxRetries: 1,
+		RetryDelay: 2 * time.Second,
 	}
 }
 
