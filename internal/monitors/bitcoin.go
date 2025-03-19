@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+
+	rate "golang.org/x/time/rate"
 	"io"
 	"log"
 	"net/http"
@@ -22,6 +24,7 @@ type BitcoinMonitor struct {
 	MaxRetries      int
 	RetryDelay      time.Duration
 	blockHead       int64
+	rateLimiter     *rate.Limiter
 }
 
 func (b *BitcoinMonitor) Initialize() error {
@@ -105,13 +108,23 @@ func (b *BitcoinMonitor) makeRPCCall(method string, params []interface{}) (strin
 		}
 
 		// Handle the case when Result is a JSON string
-		var stringResult string
-		if err := json.Unmarshal(response.Result, &stringResult); err == nil {
-			// If it unmarshals to a string without error, use it
-			result = stringResult
-			return nil
+		// Unmarshal the result into an interface{}
+		var resultInterface interface{}
+		if err := json.Unmarshal(response.Result, &resultInterface); err != nil {
+			return fmt.Errorf("failed to unmarshal result: %v", err)
 		}
-		result = string(response.Result)
+
+		// Now we can use a type switch on the interface{}
+		switch v := resultInterface.(type) {
+		case string:
+			result = v
+		case float64:
+			result = strconv.FormatFloat(v, 'f', -1, 64)
+		case map[string]interface{}:
+			result = string(response.Result)
+		default:
+			return fmt.Errorf("unexpected result type: %T", v)
+		}
 
 		return nil
 	})
@@ -138,7 +151,6 @@ func (b *BitcoinMonitor) StartMonitoring() error {
 
 	log.Printf("Starting %s monitoring using RPC endpoint: %s\n", b.GetChainName(), b.RpcEndpoint)
 	log.Printf("Latest %s block hash: %s\n", b.GetChainName(), b.latestBlockHash)
-	log.Printf("Latest %s block number: %d\n", b.GetChainName(), b.blockHead)
 
 	time.Sleep(5 * time.Second)
 
@@ -202,9 +214,14 @@ func (b *BitcoinMonitor) processBlock(blockHash string) (int64, error) {
 }
 
 func (b *BitcoinMonitor) processTransaction(txHash string) error {
+	//Wait for rate limit
+	if err := b.rateLimiter.Wait(context.Background()); err != nil {
+		return fmt.Errorf("rate limit error: %v", err)
+	}
+
 	txDetails, err := b.getTransaction(txHash)
 	if err != nil {
-		return fmt.Errorf("failed to get transaction details: %v\n", err)
+		return fmt.Errorf("failed to get transaction %s details: %v", txHash, err)
 	}
 
 	for _, vout := range txDetails.Vout {
@@ -234,14 +251,25 @@ func (b *BitcoinMonitor) getBlock(blockHash string) (*BlockDetails, error) {
 }
 
 func (b *BitcoinMonitor) getTransaction(txHash string) (*TransactionDetails, error) {
+	time.After(time.Second * 1)
 	result, err := b.makeRPCCall("getrawtransaction", []interface{}{txHash, true})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("RPC call failed: %v", err)
 	}
+
+	// Log the raw result for debugging
+	//log.Printf("Raw transaction result for %s: %s", txHash, result)
 
 	var tx TransactionDetails
 	if err := json.Unmarshal([]byte(result), &tx); err != nil {
-		return nil, err
+		// Log the error and the result that caused it
+		log.Printf("Failed to unmarshal transaction %s: %v\nRaw result: %s", txHash, err, result)
+		return nil, fmt.Errorf("failed to parse transaction details: %v", err)
+	}
+
+	// Validate the parsed transaction
+	if tx.Txid == "" {
+		return nil, fmt.Errorf("parsed transaction is invalid (empty Txid)")
 	}
 
 	return &tx, nil
@@ -317,8 +345,9 @@ func NewBitcoinMonitor() *BitcoinMonitor {
 			ApiKey:      os.Getenv("BLOCKDAEMON_API_KEY"),
 			Addresses:   []string{"bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh"},
 		},
-		MaxRetries: 2,
-		RetryDelay: 2 * time.Second,
+		MaxRetries:  2,
+		RetryDelay:  2 * time.Second,
+		rateLimiter: rate.NewLimiter(rate.Every(time.Second), 100), // 100 requests per second
 	}
 }
 
