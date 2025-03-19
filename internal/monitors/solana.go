@@ -4,6 +4,7 @@ import (
 	"blockchain-monitor/internal/interfaces"
 	"blockchain-monitor/internal/models"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -513,16 +514,24 @@ func NewSolanaMonitor() *SolanaMonitor {
 	}
 }
 
-func (s *SolanaMonitor) Start(emitter interfaces.EventEmitter) error {
-	s.EventEmitter = emitter
-	// Initialize Solana monitor
-	if err := s.Initialize(); err != nil {
-		log.Fatalf("Failed to initialize Solana monitor: %v", err)
+func (s *SolanaMonitor) Start(ctx context.Context, emitter interfaces.EventEmitter) error {
+	for {
+		select {
+		case <-ctx.Done():
+			log.Printf("%s monitor shutting down", s.GetChainName())
+			return nil
+		default:
+			s.EventEmitter = emitter
+			// Initialize Solana monitor
+			if err := s.Initialize(); err != nil {
+				log.Fatalf("Failed to initialize Solana monitor: %v", err)
+			}
+			// Start monitoring Solana blockchain
+			if err := s.StartMonitoring(); err != nil {
+				log.Fatalf("Failed to start Solana monitoring: %v", err)
+				return err
+			}
+			return nil
+		}
 	}
-	// Start monitoring Solana blockchain
-	if err := s.StartMonitoring(); err != nil {
-		log.Fatalf("Failed to start Solana monitoring: %v", err)
-		return err
-	}
-	return nil
 }

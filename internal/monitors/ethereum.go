@@ -281,19 +281,27 @@ func NewEthereumMonitor() *EthereumMonitor {
 	}
 }
 
-func (e *EthereumMonitor) Start(emitter interfaces.EventEmitter) error {
-	// Set the EventEmitter
-	e.EventEmitter = emitter
+func (e *EthereumMonitor) Start(ctx context.Context, emitter interfaces.EventEmitter) error {
+	for {
+		select {
+		case <-ctx.Done():
+			log.Printf("%s monitor shutting down", e.GetChainName())
+			return nil
+		default:
+			// Set the EventEmitter
+			e.EventEmitter = emitter
 
-	// Initialize Start monitor
-	if err := e.Initialize(); err != nil {
-		log.Fatalf("Failed to initialize Start monitor: %v", err)
-		return err
+			// Initialize Start monitor
+			if err := e.Initialize(); err != nil {
+				log.Fatalf("Failed to initialize Start monitor: %v", err)
+				return err
+			}
+			// Start monitoring Start blockchain
+			if err := e.StartMonitoring(); err != nil {
+				log.Fatalf("Failed to start Start monitoring: %v", err)
+				return err
+			}
+			return nil
+		}
 	}
-	// Start monitoring Start blockchain
-	if err := e.StartMonitoring(); err != nil {
-		log.Fatalf("Failed to start Start monitoring: %v", err)
-		return err
-	}
-	return nil
 }

@@ -3,22 +3,25 @@ package monitors
 import (
 	"blockchain-monitor/internal/interfaces"
 	"blockchain-monitor/internal/models"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
 
 type BitcoinMonitor struct {
 	BaseMonitor
-	client      *http.Client
-	latestBlock string
-	MaxRetries  int
-	RetryDelay  time.Duration
+	client          *http.Client
+	latestBlockHash string
+	MaxRetries      int
+	RetryDelay      time.Duration
+	blockHead       int64
 }
 
 func (b *BitcoinMonitor) Initialize() error {
@@ -31,8 +34,14 @@ func (b *BitcoinMonitor) Initialize() error {
 		return fmt.Errorf("failed to connect to Bitcoin node: %v\n", err)
 	}
 
-	b.latestBlock = bestBlockHash
+	blockHead, err := b.getBlockHead()
+	if err != nil {
+		return fmt.Errorf("failed to get latest block height: %v\n", err)
+	}
+
+	b.latestBlockHash = bestBlockHash
 	log.Printf("Connected to Bitcoin node. Latest block hash: %s\n", bestBlockHash)
+	log.Printf("Connected to Bitcoin node. Latest block number: %d\n", blockHead)
 
 	return nil
 }
@@ -61,6 +70,7 @@ func (b *BitcoinMonitor) makeRPCCall(method string, params []interface{}) (strin
 	req.Header.Add("Content-Type", "application/json")
 
 	var result string
+	var responseBody []byte
 	err = b.retry(func() error {
 		res, err := b.client.Do(req)
 		if err != nil {
@@ -68,38 +78,46 @@ func (b *BitcoinMonitor) makeRPCCall(method string, params []interface{}) (strin
 		}
 		defer res.Body.Close()
 
-		body, err := io.ReadAll(res.Body)
+		responseBody, err = io.ReadAll(res.Body)
 		if err != nil {
 			return fmt.Errorf("failed to read response body: %v", err)
 		}
 
 		// Check if the response starts with '<', indicating HTML
-		if strings.TrimSpace(string(body))[0] == '<' {
-			return fmt.Errorf("received HTML response instead of JSON. First 100 characters: %s", string(body)[:100])
+		if strings.TrimSpace(string(responseBody))[0] == '<' {
+			return fmt.Errorf("received HTML response instead of JSON. Response body: %s", string(responseBody))
 		}
 
 		var response struct {
-			Result string `json:"result"`
+			Result json.RawMessage `json:"result"`
 			Error  *struct {
 				Code    int    `json:"code"`
 				Message string `json:"message"`
 			} `json:"error"`
 		}
 
-		if err := json.Unmarshal(body, &response); err != nil {
-			return fmt.Errorf("failed to parse JSON response: %v. Response body: %s", err, string(body))
+		if err := json.Unmarshal(responseBody, &response); err != nil {
+			return fmt.Errorf("failed to parse JSON response: %v. Response body: %s", err, string(responseBody))
 		}
 
 		if response.Error != nil {
 			return fmt.Errorf("RPC error: %d - %s", response.Error.Code, response.Error.Message)
 		}
 
-		result = response.Result
+		// Handle the case when Result is a JSON string
+		var stringResult string
+		if err := json.Unmarshal(response.Result, &stringResult); err == nil {
+			// If it unmarshals to a string without error, use it
+			result = stringResult
+			return nil
+		}
+		result = string(response.Result)
+
 		return nil
 	})
 
 	if err != nil {
-		log.Printf("RPC call to method %s failed: %v\n", method, err)
+		log.Printf("RPC call to method %s failed: %v\nResponse body: %s\n", method, err, string(responseBody))
 	}
 
 	return result, err
@@ -117,11 +135,29 @@ func (b *BitcoinMonitor) retry(fn func() error) error {
 }
 
 func (b *BitcoinMonitor) StartMonitoring() error {
-	log.Printf("Starting %s monitoring from block %s\n", b.GetChainName(), b.latestBlock)
+
+	log.Printf("Starting %s monitoring using RPC endpoint: %s\n", b.GetChainName(), b.RpcEndpoint)
+	log.Printf("Latest %s block hash: %s\n", b.GetChainName(), b.latestBlockHash)
+	log.Printf("Latest %s block number: %d\n", b.GetChainName(), b.blockHead)
+
+	time.Sleep(5 * time.Second)
 
 	go b.monitorBlocks()
 
 	return nil
+}
+
+func (b *BitcoinMonitor) getBlockHead() (int64, error) {
+	result, err := b.makeRPCCall("getblockcount", nil)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get current block number: %v", err)
+	}
+	height, err := strconv.ParseInt(result, 10, 0)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse block height: %v", err)
+	}
+
+	return height, nil
 }
 
 func (b *BitcoinMonitor) monitorBlocks() {
@@ -133,11 +169,14 @@ func (b *BitcoinMonitor) monitorBlocks() {
 			continue
 		}
 
-		if currentBlockHash != b.latestBlock {
-			if err := b.processBlock(currentBlockHash); err != nil {
+		if currentBlockHash != b.latestBlockHash {
+			if blockHeight, err := b.processBlock(currentBlockHash); err != nil {
 				log.Printf("BTC - Error processing block %s: %v\n", currentBlockHash, err)
 			} else {
-				b.latestBlock = currentBlockHash
+
+				b.latestBlockHash = currentBlockHash
+				b.blockHead = blockHeight
+				log.Printf("BTC - Updated to block %s\n", currentBlockHash)
 			}
 		}
 
@@ -145,10 +184,10 @@ func (b *BitcoinMonitor) monitorBlocks() {
 	}
 }
 
-func (b *BitcoinMonitor) processBlock(blockHash string) error {
+func (b *BitcoinMonitor) processBlock(blockHash string) (int64, error) {
 	block, err := b.getBlock(blockHash)
 	if err != nil {
-		return fmt.Errorf("Bitcoin - failed to get block details: %v", err)
+		return 0, fmt.Errorf("Bitcoin - failed to get block details: %v", err)
 	}
 
 	log.Printf("Processing Bitcoin block %s with %d transactions\n", blockHash, len(block.Tx))
@@ -159,7 +198,7 @@ func (b *BitcoinMonitor) processBlock(blockHash string) error {
 		}
 	}
 
-	return nil
+	return block.Height, nil
 }
 
 func (b *BitcoinMonitor) processTransaction(txHash string) error {
@@ -234,8 +273,9 @@ func (b *BitcoinMonitor) emitTransactionEvent(tx *TransactionDetails, address st
 }
 
 type BlockDetails struct {
-	Hash string   `json:"hash"`
-	Tx   []string `json:"tx"`
+	Hash   string   `json:"hash"`
+	Tx     []string `json:"tx"`
+	Height int64    `json:"height"`
 }
 
 type TransactionDetails struct {
@@ -282,17 +322,25 @@ func NewBitcoinMonitor() *BitcoinMonitor {
 	}
 }
 
-func (b *BitcoinMonitor) Start(emitter interfaces.EventEmitter) error {
-	b.EventEmitter = emitter
-	// Initialize Bitcoin monitor
-	if err := b.Initialize(); err != nil {
-		log.Fatalf("Failed to initialize Bitcoin monitor: %v", err)
-		return err
+func (b *BitcoinMonitor) Start(ctx context.Context, emitter interfaces.EventEmitter) error {
+	for {
+		select {
+		case <-ctx.Done():
+			log.Printf("%s monitor shutting down", b.GetChainName())
+			return nil
+		default:
+			b.EventEmitter = emitter
+			// Initialize Bitcoin monitor
+			if err := b.Initialize(); err != nil {
+				log.Fatalf("Failed to initialize Bitcoin monitor: %v", err)
+				return err
+			}
+			// Start monitoring Bitcoin blockchain
+			if err := b.StartMonitoring(); err != nil {
+				log.Fatalf("Failed to start Bitcoin monitoring: %v", err)
+				return err
+			}
+			return nil
+		}
 	}
-	// Start monitoring Bitcoin blockchain
-	if err := b.StartMonitoring(); err != nil {
-		log.Fatalf("Failed to start Bitcoin monitoring: %v", err)
-		return err
-	}
-	return nil
 }

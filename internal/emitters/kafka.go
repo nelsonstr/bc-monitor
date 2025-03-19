@@ -34,3 +34,7 @@ func (k *KafkaEmitter) EmitEvent(event models.TransactionEvent) error {
 	log.Printf("Successfully emitted %s event to Kafka: %s", event.Chain, event.TxHash)
 	return nil
 }
+
+func (k *KafkaEmitter) Close() error {
+	return nil
+}

@@ -1,10 +1,13 @@
 package interfaces
 
-import "blockchain-monitor/internal/models"
+import (
+	"blockchain-monitor/internal/models"
+	"context"
+)
 
 // BlockchainMonitor defines the interface for blockchain monitoring
 type BlockchainMonitor interface {
-	Start(emitter EventEmitter) error
+	Start(ctx context.Context, emitter EventEmitter) error
 	// Initialize sets up the blockchain client
 	Initialize() error
 
