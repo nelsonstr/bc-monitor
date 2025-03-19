@@ -11,7 +11,7 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"strings"
+
 	"time"
 )
 
@@ -27,16 +27,6 @@ type SolanaRpcRequest struct {
 	ID      int           `json:"id"`
 	Method  string        `json:"method"`
 	Params  []interface{} `json:"params"`
-}
-
-type SolanaRpcResponse struct {
-	Jsonrpc string          `json:"jsonrpc"`
-	ID      int             `json:"id"`
-	Result  json.RawMessage `json:"result"`
-	Error   *struct {
-		Code    int    `json:"code"`
-		Message string `json:"message"`
-	} `json:"error,omitempty"`
 }
 
 type SolanaSlotResponse struct {
@@ -272,17 +262,7 @@ func minDuration(a, b time.Duration) time.Duration {
 }
 
 func (s *SolanaMonitor) getLatestSlot() (uint64, error) {
-	reqBody, err := json.Marshal(SolanaRpcRequest{
-		Jsonrpc: "2.0",
-		ID:      1,
-		Method:  "getSlot",
-		Params:  []interface{}{},
-	})
-	if err != nil {
-		return 0, err
-	}
-
-	resp, err := s.makeRpcRequest(reqBody)
+	resp, err := s.makeRpcRequest("getSlot", nil)
 	if err != nil {
 		return 0, err
 	}
@@ -296,25 +276,25 @@ func (s *SolanaMonitor) getLatestSlot() (uint64, error) {
 }
 
 func (s *SolanaMonitor) getBlock(slot uint64) ([]SolanaTransaction, error) {
-	reqBody, err := json.Marshal(SolanaRpcRequest{
-		Jsonrpc: "2.0",
-		ID:      1,
-		Method:  "getBlock",
-		Params: []interface{}{
-			slot,
-			map[string]interface{}{
-				"encoding":                       "json",
-				"maxSupportedTransactionVersion": 0,
-				"transactionDetails":             "full",
-				"rewards":                        false,
-			},
+	//reqBody, err := json.Marshal(SolanaRpcRequest{
+	//	Jsonrpc: "2.0",
+	//	ID:      1,
+	//	Method:  "getBlock",
+	//	Params:
+	//})
+	//if err != nil {
+	//	return nil, err
+	//}
+
+	resp, err := s.makeRpcRequest("getBlock", []interface{}{
+		slot,
+		map[string]interface{}{
+			"encoding":                       "json",
+			"maxSupportedTransactionVersion": 0,
+			"transactionDetails":             "full",
+			"rewards":                        false,
 		},
 	})
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := s.makeRpcRequest(reqBody)
 	if err != nil {
 		return nil, err
 	}
@@ -329,14 +309,25 @@ func (s *SolanaMonitor) getBlock(slot uint64) ([]SolanaTransaction, error) {
 	return blockResp.Transactions, nil
 }
 
-func (s *SolanaMonitor) makeRpcRequest(reqBody []byte) (*SolanaRpcResponse, error) {
-	req, err := http.NewRequest("POST", s.RpcEndpoint, strings.NewReader(string(reqBody)))
+func (s *SolanaMonitor) makeRpcRequest(method string, params []interface{}) (*RPCResponse, error) {
+	request := RPCRequest{
+		Jsonrpc: "2.0",
+		ID:      "1",
+		Method:  method,
+		Params:  params,
+	}
+
+	payload, err := json.Marshal(request)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %v", err)
+	}
+
+	req, err := http.NewRequest("POST", s.RpcEndpoint, bytes.NewReader(payload))
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
 
-	// Add Blockdaemon API key to the request header
+	req.Header.Set("Content-Type", "application/json")
 	if s.ApiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+s.ApiKey)
 	}
@@ -347,26 +338,20 @@ func (s *SolanaMonitor) makeRpcRequest(reqBody []byte) (*SolanaRpcResponse, erro
 	}
 	defer resp.Body.Close()
 
-	// Check HTTP status code
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP error: %d - %s\n", resp.StatusCode, resp.Status)
+		return nil, fmt.Errorf("HTTP error: %d - %s", resp.StatusCode, resp.Status)
 	}
 
-	var rpcResp SolanaRpcResponse
-	decoder := json.NewDecoder(resp.Body)
-	if err := decoder.Decode(&rpcResp); err != nil {
-		// Try to read the raw response for debugging
-		bodyBytes, _ := json.Marshal(map[string]interface{}{
-			"error": err.Error(),
-		})
-		return nil, fmt.Errorf("JSON decode error: %v - Response: %s\n", err, string(bodyBytes))
+	var response RPCResponse
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %v", err)
 	}
 
-	if rpcResp.Error != nil {
-		return nil, fmt.Errorf("RPC error: %d - %s\n", rpcResp.Error.Code, rpcResp.Error.Message)
+	if response.Error != nil {
+		return nil, fmt.Errorf("RPC error: %d - %s", response.Error.Code, response.Error.Message)
 	}
 
-	return &rpcResp, nil
+	return &response, nil
 }
 
 func (s *SolanaMonitor) processTransaction(tx SolanaTransaction, watchAddresses map[string]bool) {
@@ -453,22 +438,13 @@ func (s *SolanaMonitor) GetExplorerURL(txHash string) string {
 }
 
 func (s *SolanaMonitor) getRecentTransactionDetails(address string) (TransactionDetails, error) {
-	reqBody, err := json.Marshal(SolanaRpcRequest{
-		Jsonrpc: "2.0",
-		ID:      1,
-		Method:  "getSignaturesForAddress",
-		Params: []interface{}{
-			address,
-			map[string]interface{}{
-				"limit": 1,
-			},
+
+	resp, err := s.makeRpcRequest("getSignaturesForAddress", []interface{}{
+		address,
+		map[string]interface{}{
+			"limit": 1,
 		},
 	})
-	if err != nil {
-		return TransactionDetails{}, err
-	}
-
-	resp, err := s.makeRpcRequest(reqBody)
 	if err != nil {
 		return TransactionDetails{}, err
 	}
@@ -486,23 +462,12 @@ func (s *SolanaMonitor) getRecentTransactionDetails(address string) (Transaction
 		return TransactionDetails{}, fmt.Errorf("no recent transactions found")
 	}
 
-	// Get transaction details
-	txReqBody, err := json.Marshal(SolanaRpcRequest{
-		Jsonrpc: "2.0",
-		ID:      1,
-		Method:  "getTransaction",
-		Params: []interface{}{
-			signaturesResp[0].Signature,
-			map[string]interface{}{
-				"encoding": "jsonParsed",
-			},
+	txResp, err := s.makeRpcRequest("getTransaction", []interface{}{
+		signaturesResp[0].Signature,
+		map[string]interface{}{
+			"encoding": "jsonParsed",
 		},
 	})
-	if err != nil {
-		return TransactionDetails{}, err
-	}
-
-	txResp, err := s.makeRpcRequest(txReqBody)
 	if err != nil {
 		return TransactionDetails{}, err
 	}

@@ -9,11 +9,11 @@ import (
 	"fmt"
 
 	"golang.org/x/time/rate"
-	"io"
 	"net/http"
 	"os"
 	"strconv"
-	"strings"
+
+	"bytes"
 	"time"
 )
 
@@ -25,6 +25,23 @@ type BitcoinMonitor struct {
 	RetryDelay      time.Duration
 	blockHead       int64
 	rateLimiter     *rate.Limiter
+}
+
+type RPCRequest struct {
+	Jsonrpc string        `json:"jsonrpc"`
+	ID      string        `json:"id"`
+	Method  string        `json:"method"`
+	Params  []interface{} `json:"params"`
+}
+
+type RPCResponse struct {
+	Jsonrpc string          `json:"jsonrpc"`
+	ID      string          `json:"id"`
+	Result  json.RawMessage `json:"result"`
+	Error   *struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	} `json:"error,omitempty"`
 }
 
 func (b *BitcoinMonitor) Initialize() error {
@@ -65,29 +82,34 @@ func (b *BitcoinMonitor) makeRPCCall(method string, params []interface{}) (strin
 		return "", fmt.Errorf("rate limit error: %v", err)
 	}
 
-	payload, err := json.Marshal(map[string]interface{}{
-		"jsonrpc": "2.0",
-		"id":      "test",
-		"method":  method,
-		"params":  params,
-	})
+	request := RPCRequest{
+		Jsonrpc: "2.0",
+		ID:      "1",
+		Method:  method,
+		Params:  params,
+	}
+
+	payload, err := json.Marshal(request)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal JSON payload: %v", err)
 	}
 
 	logger.Log.Debug().
-		Str("payload", string(payload)).
+		Str("method", method).
+		Interface("params", params).
 		Msg("Making RPC call")
-	req, err := http.NewRequest("POST", b.RpcEndpoint, strings.NewReader(string(payload)))
+
+	req, err := http.NewRequest("POST", b.RpcEndpoint, bytes.NewReader(payload))
 	if err != nil {
 		return "", fmt.Errorf("failed to create HTTP request: %v", err)
 	}
 
-	req.Header.Add("Authorization", "Bearer "+b.ApiKey)
-	req.Header.Add("Content-Type", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	if b.ApiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+b.ApiKey)
+	}
 
-	var result string
-	var responseBody []byte
+	var response RPCResponse
 	err = b.retry(func() error {
 		res, err := b.client.Do(req)
 		if err != nil {
@@ -95,49 +117,16 @@ func (b *BitcoinMonitor) makeRPCCall(method string, params []interface{}) (strin
 		}
 		defer res.Body.Close()
 
-		responseBody, err = io.ReadAll(res.Body)
-		if err != nil {
-			return fmt.Errorf("failed to read response body: %v", err)
+		if res.StatusCode != http.StatusOK {
+			return fmt.Errorf("HTTP error: %d - %s", res.StatusCode, res.Status)
 		}
 
-		// Check if the response starts with '<', indicating HTML
-		if strings.TrimSpace(string(responseBody))[0] == '<' {
-			return fmt.Errorf("received HTML response instead of JSON. Response body: %s", string(responseBody))
-		}
-
-		var response struct {
-			Result json.RawMessage `json:"result"`
-			Error  *struct {
-				Code    int    `json:"code"`
-				Message string `json:"message"`
-			} `json:"error"`
-		}
-
-		if err := json.Unmarshal(responseBody, &response); err != nil {
-			return fmt.Errorf("failed to parse JSON response: %v. Response body: %s", err, string(responseBody))
+		if err := json.NewDecoder(res.Body).Decode(&response); err != nil {
+			return fmt.Errorf("failed to decode response: %v", err)
 		}
 
 		if response.Error != nil {
 			return fmt.Errorf("RPC error: %d - %s", response.Error.Code, response.Error.Message)
-		}
-
-		// Handle the case when Result is a JSON string
-		// Unmarshal the result into an interface{}
-		var resultInterface interface{}
-		if err := json.Unmarshal(response.Result, &resultInterface); err != nil {
-			return fmt.Errorf("failed to unmarshal result: %v", err)
-		}
-
-		// Now we can use a type switch on the interface{}
-		switch v := resultInterface.(type) {
-		case string:
-			result = v
-		case float64:
-			result = strconv.FormatFloat(v, 'f', -1, 64)
-		case map[string]interface{}:
-			result = string(response.Result)
-		default:
-			return fmt.Errorf("unexpected result type: %T", v)
 		}
 
 		return nil
@@ -147,11 +136,30 @@ func (b *BitcoinMonitor) makeRPCCall(method string, params []interface{}) (strin
 		logger.Log.Error().
 			Err(err).
 			Str("method", method).
-			Str("responseBody", string(responseBody)).
-			Msg("BITCOIN - RPC call failed")
+			Interface("params", params).
+			Msg("RPC call failed")
+		return "", err
 	}
 
-	return result, err
+	// Handle different result types
+	var result string
+	var resultInterface interface{}
+	if err := json.Unmarshal(response.Result, &resultInterface); err != nil {
+		return "", fmt.Errorf("failed to unmarshal result: %v", err)
+	}
+
+	switch v := resultInterface.(type) {
+	case string:
+		result = v
+	case float64:
+		result = strconv.FormatFloat(v, 'f', -1, 64)
+	case map[string]interface{}:
+		result = string(response.Result)
+	default:
+		return "", fmt.Errorf("unexpected result type: %T", v)
+	}
+
+	return result, nil
 }
 
 func (b *BitcoinMonitor) retry(fn func() error) error {
