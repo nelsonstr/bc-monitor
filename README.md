@@ -1,7 +1,10 @@
 # backend-interview-crypto
 
 ## Mandatory task
-Given a list of Bitcoin, Ethereum, and Solana addresses associated to a `userId` (assume 1 per chain for example), create a microservice in Golang that monitors the blockchains for any transactions involving those addresses. In summary, the service should:
+Given a list of Bitcoin, Ethereum, and Solana addresses associated to a `userId` (assume 1 per chain for example)
+create a microservice in Golang that monitors the blockchains for any transactions involving those addresses.
+ 
+In summary, the service should:
 
 1. Connect via RPC to the Bitcoin, Ethereum, and Solana blockchains using Blockdaemon (feel free to use another provider if you prefer).
  

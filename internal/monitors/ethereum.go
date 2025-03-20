@@ -5,6 +5,7 @@ import (
 	"blockchain-monitor/internal/logger"
 	"blockchain-monitor/internal/models"
 	"context"
+	"encoding/json"
 	"fmt"
 	"golang.org/x/time/rate"
 	"math/big"
@@ -13,17 +14,41 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/ethereum/go-ethereum/rpc"
 )
 
 type EthereumMonitor struct {
 	BaseMonitor
-	client      *ethclient.Client
+	client      *http.Client
 	latestBlock uint64
+}
+
+type EthereumBlockDetails struct {
+	Hash          string                `json:"hash"`
+	Transactions  []EthereumTransaction `json:"transactions"`
+	Number        string                `json:"number"`
+	Timestamp     string                `json:"timestamp"`
+	BlobGasUsed   string                `json:"blobGasUsed"`
+	Difficulty    string                `json:"difficulty"`
+	ExcessBlobGas string                `json:"excessBlobGas"`
+	GasUsed       string                `json:"gasUsed"`
+	Nonce         string                `json:"nonce"`
+	Size          string                `json:"size"`
+	StateRoot     string                `json:"stateRoot"`
+}
+
+type EthereumTransaction struct {
+	BlockNumber      string `json:"blockNumber"`
+	From             string `json:"from"`
+	Gas              string `json:"gas"`
+	GasPrice         string `json:"gasPrice"`
+	Hash             string `json:"hash"`
+	Input            string `json:"input"`
+	Nonce            string `json:"nonce"`
+	To               string `json:"to"`
+	TransactionIndex string `json:"transactionIndex"`
+	Value            string `json:"value"`
+	Type             string `json:"type"`
+	ChainId          string `json:"chainId"`
 }
 
 var _ interfaces.BlockchainMonitor = (*EthereumMonitor)(nil)
@@ -73,23 +98,13 @@ func (e *EthereumMonitor) Start(ctx context.Context, emitter interfaces.EventEmi
 }
 
 func (e *EthereumMonitor) Initialize() error {
-	if e.ApiKey == "" {
-		return fmt.Errorf("API key not provided")
-	}
-
-	httpClient := &http.Client{
+	e.BaseMonitor.client = &http.Client{
+		Timeout: 30 * time.Second,
 		Transport: &customTransport{
 			base:   http.DefaultTransport,
 			apiKey: e.ApiKey,
 		},
 	}
-
-	rpcClient, err := rpc.DialHTTPWithClient(e.RpcEndpoint, httpClient)
-	if err != nil {
-		return fmt.Errorf("failed to create RPC client: %v", err)
-	}
-
-	e.client = ethclient.NewClient(rpcClient)
 	return nil
 }
 
@@ -116,12 +131,12 @@ func (e *EthereumMonitor) StartMonitoring() error {
 		}
 	}
 
-	watchAddresses := make(map[common.Address]bool)
+	watchAddresses := make(map[string]bool)
 	for _, addr := range e.Addresses {
-		watchAddresses[common.HexToAddress(addr)] = true
+		watchAddresses[strings.ToLower(addr)] = true
 	}
 
-	latestBlock, err := e.client.BlockNumber(context.Background())
+	latestBlock, err := e.getLatestBlockNumber()
 	if err != nil {
 		return fmt.Errorf("failed to get latest Ethereum block: %v", err)
 	}
@@ -136,18 +151,78 @@ func (e *EthereumMonitor) StartMonitoring() error {
 	return nil
 }
 
-func (e *EthereumMonitor) monitorBlocks(watchAddresses map[common.Address]bool) {
+func (e *EthereumMonitor) getLatestBlockNumber() (uint64, error) {
+	result, err := e.makeRPCCall("eth_blockNumber", nil)
+	if err != nil {
+
+		return 0, err
+	}
+	// Parse response
+	var blockNumberHex string
+
+	if err := json.Unmarshal(result.Result, &blockNumberHex); err != nil {
+		logger.Log.Error().
+			Err(err).
+			Msg("Error parsing response")
+
+		return 0, err
+	}
+
+	blockNumber, err := strconv.ParseUint(blockNumberHex[2:], 16, 64)
+	if err != nil {
+
+		return 0, fmt.Errorf("failed to parse block number: %v", err)
+	}
+
+	return blockNumber, nil
+}
+
+func (e *EthereumMonitor) getBalance(address string) (*big.Int, uint64, error) {
+	params := []interface{}{address, "latest"}
+	result, err := e.makeRPCCall("eth_getBalance", params)
+	if err != nil {
+
+		return nil, 0, err
+	}
+	// Parse response
+	var balanceHex string
+
+	if err := json.Unmarshal(result.Result, &balanceHex); err != nil {
+		logger.Log.Error().
+			Err(err).
+			Msg("Error parsing response")
+
+		return nil, 0, err
+	}
+
+	balance, ok := new(big.Int).SetString(balanceHex[2:], 16)
+	if !ok {
+		return nil, 0, fmt.Errorf("failed to parse balance")
+	}
+
+	blockNumber, err := e.getLatestBlockNumber()
+	if err != nil {
+
+		return nil, 0, err
+	}
+
+	return balance, blockNumber, nil
+}
+
+func (e *EthereumMonitor) monitorBlocks(watchAddresses map[string]bool) {
 	for {
-		currentBlock, err := e.client.BlockNumber(context.Background())
+		currentBlock, err := e.getLatestBlockNumber()
 		if err != nil {
 			logger.Log.Error().Err(err).Msg("Failed to get current Ethereum block")
 			time.Sleep(5 * time.Second)
+
 			continue
 		}
 
 		for blockNum := e.latestBlock + 1; blockNum <= currentBlock; blockNum++ {
 			if err := e.processBlock(blockNum, watchAddresses); err != nil {
 				logger.Log.Error().Err(err).Uint64("blockNumber", blockNum).Msg("Error processing Ethereum block")
+
 				continue
 			}
 			e.latestBlock = blockNum
@@ -157,53 +232,42 @@ func (e *EthereumMonitor) monitorBlocks(watchAddresses map[common.Address]bool) 
 	}
 }
 
-func (e *EthereumMonitor) processBlock(blockNum uint64, watchAddresses map[common.Address]bool) error {
-	var block *types.Block
-	var err error
-
-	for attempt := 0; attempt <= e.maxRetries; attempt++ {
-		block, err = e.client.BlockByNumber(context.Background(), big.NewInt(int64(blockNum)))
-		if err == nil {
-			break
-		}
-
-		if attempt < e.maxRetries {
-			logger.Log.Warn().
-				Err(err).
-				Int("attempt", attempt+1).
-				Uint64("blockNumber", blockNum).
-				Msg("Failed to get Ethereum block. Retrying...")
-			time.Sleep(e.retryDelay)
-		}
+func (e *EthereumMonitor) processBlock(blockNum uint64, watchAddresses map[string]bool) error {
+	params := []interface{}{fmt.Sprintf("0x%x", blockNum), true}
+	result, err := e.makeRPCCall("eth_getBlockByNumber", params)
+	if err != nil {
+		return err
 	}
 
-	if err != nil {
-		return fmt.Errorf("failed to get Ethereum block %d after %d attempts: %v", blockNum, e.maxRetries+1, err)
+	var blockDetails EthereumBlockDetails
+	if err := json.Unmarshal(result.Result, &blockDetails); err != nil {
+		return fmt.Errorf("failed to parse block details: %w", err)
 	}
 
 	logger.Log.Info().
 		Uint64("blockNumber", blockNum).
-		Int("transactionCount", len(block.Transactions())).
+		Int("transactionCount", len(blockDetails.Transactions)).
 		Msg("Processing Ethereum block")
+	timestamp, err := strconv.ParseUint(blockDetails.Timestamp[2:], 16, 64)
+	if err != nil {
 
-	for i, tx := range block.Transactions() {
-		logger.Log.Debug().
-			Int("index", i).
-			Str("txHash", tx.Hash().Hex()).
-			Msg("Processing transaction")
+		return fmt.Errorf("failed to parse block timestamp: %w", err)
+	}
 
-		if err := e.processSingleTransaction(tx, watchAddresses, block.Time()); err != nil {
+	for i, tx := range blockDetails.Transactions {
+
+		if err := e.processSingleTransaction(tx, watchAddresses, timestamp); err != nil {
 			logger.Log.Warn().
 				Err(err).
 				Int("index", i).
-				Str("txHash", tx.Hash().Hex()).
+				Str("txHash", tx.Hash).
 				Msg("Error processing Ethereum transaction")
 			continue
 		}
 
 		logger.Log.Debug().
 			Int("index", i).
-			Str("txHash", tx.Hash().Hex()).
+			Str("txHash", tx.Hash).
 			Msg("Successfully processed transaction")
 	}
 
@@ -214,43 +278,19 @@ func (e *EthereumMonitor) processBlock(blockNum uint64, watchAddresses map[commo
 	return nil
 }
 
-func (e *EthereumMonitor) processSingleTransaction(tx *types.Transaction, watchAddresses map[common.Address]bool, blockTime uint64) error {
-	if tx == nil {
-		return fmt.Errorf("received nil transaction")
-	}
+func (e *EthereumMonitor) processSingleTransaction(tx EthereumTransaction, watchAddresses map[string]bool, blockTime uint64) error {
+	from := strings.ToLower(tx.From)
+	to := strings.ToLower(tx.To)
 
-	from, err := types.Sender(types.LatestSignerForChainID(tx.ChainId()), tx)
-	if err != nil {
-		return fmt.Errorf("failed to get sender for transaction %s: %v", tx.Hash().Hex(), err)
-	}
-
-	to := tx.To()
-
-	if watchAddresses[from] {
-		if to != nil {
-			event := e.processTransaction(tx, from.Hex(), to.Hex(), blockTime)
-			if e.EventEmitter != nil {
-				e.EventEmitter.EmitEvent(event)
-				logger.Log.Info().
-					Str("from", from.Hex()).
-					Str("to", to.Hex()).
-					Str("txHash", tx.Hash().Hex()).
-					Msg("Emitted outgoing transaction event")
-			} else {
-				logger.Log.Warn().Msg("EventEmitter is nil, cannot emit event")
-			}
-		}
-	}
-
-	if to != nil && watchAddresses[*to] {
-		event := e.processTransaction(tx, from.Hex(), to.Hex(), blockTime)
+	if watchAddresses[from] || watchAddresses[to] {
+		event := e.processTransaction(tx, from, to, blockTime)
 		if e.EventEmitter != nil {
 			e.EventEmitter.EmitEvent(event)
 			logger.Log.Info().
-				Str("from", from.Hex()).
-				Str("to", to.Hex()).
-				Str("txHash", tx.Hash().Hex()).
-				Msg("Emitted incoming transaction event")
+				Str("from", from).
+				Str("to", to).
+				Str("txHash", tx.Hash).
+				Msg("Emitted transaction event")
 		} else {
 			logger.Log.Warn().Msg("EventEmitter is nil, cannot emit event")
 		}
@@ -259,27 +299,18 @@ func (e *EthereumMonitor) processSingleTransaction(tx *types.Transaction, watchA
 	return nil
 }
 
-func (e *EthereumMonitor) processTransaction(tx *types.Transaction, from, to string, blockTime uint64) models.TransactionEvent {
-	value := new(big.Float).Quo(
-		new(big.Float).SetInt(tx.Value()),
-		new(big.Float).SetFloat64(1e18),
-	)
-	valueStr := value.Text('f', 18)
+func (e *EthereumMonitor) processTransaction(tx EthereumTransaction, from, to string, blockTime uint64) models.TransactionEvent {
+	value, _ := new(big.Int).SetString(tx.Value[2:], 16)
+	valueFloat := new(big.Float).Quo(new(big.Float).SetInt(value), big.NewFloat(1e18))
+	valueStr := valueFloat.Text('f', 18)
 	valueStr = strings.TrimRight(strings.TrimRight(valueStr, "0"), ".")
 
-	var gasPrice *big.Int
-	if tx.Type() == types.DynamicFeeTxType {
-		gasPrice = tx.GasFeeCap()
-	} else {
-		gasPrice = tx.GasPrice()
-	}
-
-	gasPriceFloat := new(big.Float).Quo(
-		new(big.Float).SetInt(gasPrice),
-		new(big.Float).SetFloat64(1e18),
+	gasPrice, _ := new(big.Int).SetString(tx.GasPrice[2:], 16)
+	gasUsed, _ := new(big.Int).SetString(tx.Gas[2:], 16)
+	fees := new(big.Float).Quo(
+		new(big.Float).SetInt(new(big.Int).Mul(gasPrice, gasUsed)),
+		big.NewFloat(1e18),
 	)
-	gasUsed := new(big.Float).SetUint64(tx.Gas())
-	fees := new(big.Float).Mul(gasPriceFloat, gasUsed)
 	feesStr := fees.Text('f', 18)
 	feesStr = strings.TrimRight(strings.TrimRight(feesStr, "0"), ".")
 
@@ -289,7 +320,7 @@ func (e *EthereumMonitor) processTransaction(tx *types.Transaction, from, to str
 		Amount:    valueStr,
 		Fees:      feesStr,
 		Chain:     e.GetChainName(),
-		TxHash:    tx.Hash().Hex(),
+		TxHash:    tx.Hash,
 		Timestamp: time.Unix(int64(blockTime), 0),
 	}
 }
@@ -309,30 +340,4 @@ func (t *customTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 func (e *EthereumMonitor) GetExplorerURL(txHash string) string {
 	return fmt.Sprintf("https://etherscan.io/tx/%s", txHash)
-}
-
-func (e *EthereumMonitor) getBalance(address string) (*big.Int, uint64, error) {
-	blockNumber, err := e.client.BlockNumber(context.Background())
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to get latest block number: %v", err)
-	}
-
-	account := common.HexToAddress(address)
-	balance, err := e.client.BalanceAt(context.Background(), account, big.NewInt(int64(blockNumber)))
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to get balance: %v", err)
-	}
-
-	return balance, blockNumber, nil
-}
-
-func (b *EthereumMonitor) Retry(fn func() error) error {
-	var err error
-	for i := 0; i < b.maxRetries; i++ {
-		if err = fn(); err == nil {
-			return nil
-		}
-		time.Sleep(b.retryDelay)
-	}
-	return err
 }

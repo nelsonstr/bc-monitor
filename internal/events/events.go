@@ -17,7 +17,7 @@ func (d *PrintEmitter) EmitEvent(event models.TransactionEvent) error {
 	// Print  storage values
 	logger.Log.Info().
 		Str("chain", event.Chain).
-		Msg("DB STORAGE VALUES")
+		Msg("STORAGE VALUES")
 
 	logger.Log.Info().
 		Str("chain", event.Chain).

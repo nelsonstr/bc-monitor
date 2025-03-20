@@ -41,9 +41,9 @@ func main() {
 	printEmitter := &events.PrintEmitter{
 		WrappedEmitter: kafkaEmitter,
 		Monitors: map[string]interfaces.BlockchainMonitor{
-			//ethereumMonitor.GetChainName(): ethereumMonitor,
-			//bitcoinMonitor.GetChainName(): bitcoinMonitor,
-			solanaMonitor.GetChainName(): solanaMonitor,
+			ethereumMonitor.GetChainName(): ethereumMonitor,
+			bitcoinMonitor.GetChainName():  bitcoinMonitor,
+			solanaMonitor.GetChainName():   solanaMonitor,
 		},
 	}
 
