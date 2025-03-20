@@ -11,7 +11,7 @@ type BlockchainMonitor interface {
 	Initialize() error
 
 	// StartMonitoring begins monitoring for transactions involving specified addresses
-	StartMonitoring() error
+	StartMonitoring(ctx context.Context) error
 
 	// GetChainName returns the name of the blockchain
 	GetChainName() string

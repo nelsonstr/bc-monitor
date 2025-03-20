@@ -5,7 +5,9 @@ import (
 	"blockchain-monitor/internal/events"
 	"blockchain-monitor/internal/interfaces"
 	"blockchain-monitor/internal/logger"
-	"blockchain-monitor/internal/monitors"
+	"blockchain-monitor/internal/monitors/bitcoin"
+	"blockchain-monitor/internal/monitors/evm"
+	"blockchain-monitor/internal/monitors/solana"
 	"context"
 	"github.com/joho/godotenv"
 	"os"
@@ -36,19 +38,19 @@ func main() {
 	rateLimit := getRateLimit()
 
 	// Create monitors
-	bitcoinMonitor := monitors.NewBitcoinMonitor(
+	bitcoinMonitor := bitcoin.NewBitcoinMonitor(
 		os.Getenv("BITCOIN_RPC_ENDPOINT"),
 		os.Getenv("BITCOIN_API_KEY"),
 		rateLimit,
 		logger.GetLogger())
 
-	ethereumMonitor := monitors.NewEthereumMonitor(
+	ethereumMonitor := evm.NewEthereumMonitor(
 		os.Getenv("ETHEREUM_RPC_ENDPOINT"),
 		os.Getenv("ETHEREUM_API_KEY"),
 		rateLimit,
 		logger.GetLogger())
 
-	solanaMonitor := monitors.NewSolanaMonitor(
+	solanaMonitor := solana.NewSolanaMonitor(
 		os.Getenv("SOLANA_RPC_ENDPOINT"),
 		os.Getenv("SOLANA_API_KEY"),
 		rateLimit,

@@ -19,27 +19,40 @@ type BaseMonitor struct {
 	RpcEndpoint  string
 	EventEmitter interfaces.EventEmitter
 	Addresses    []string
-	maxRetries   int
-	retryDelay   time.Duration
-	rateLimiter  *rate.Limiter
+	MaxRetries   int
+	RetryDelay   time.Duration
+	RateLimiter  *rate.Limiter
 
-	logger *zerolog.Logger
+	Logger *zerolog.Logger
 
-	client *http.Client
+	Client *http.Client
+}
+
+type CustomTransport struct {
+	Base   http.RoundTripper
+	ApiKey string
+}
+
+func (t *CustomTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	req.Header.Set("Content-Type", "application/json")
+	if t.ApiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+t.ApiKey)
+	}
+	return t.Base.RoundTrip(req)
 }
 
 func NewBaseMonitor(addresses []string, rpcClient *http.Client, logger *zerolog.Logger) *BaseMonitor {
 	return &BaseMonitor{
-		logger:    logger,
+		Logger:    logger,
 		Addresses: addresses,
-		client:    rpcClient,
+		Client:    rpcClient,
 	}
 }
 
-func (s *BaseMonitor) makeRPCCall(method string, params []interface{}) (*models.RPCResponse, error) {
+func (s *BaseMonitor) MakeRPCCall(method string, params []interface{}) (*models.RPCResponse, error) {
 	// Wait for rate limit
-	if err := s.rateLimiter.Wait(context.Background()); err != nil {
-		s.logger.Error().Err(err).Msg("Rate limit error")
+	if err := s.RateLimiter.Wait(context.Background()); err != nil {
+		s.Logger.Error().Err(err).Msg("Rate limit error")
 		return nil, fmt.Errorf("rate limit error: %v", err)
 	}
 
@@ -55,7 +68,7 @@ func (s *BaseMonitor) makeRPCCall(method string, params []interface{}) (*models.
 		return nil, fmt.Errorf("failed to marshal request: %v", err)
 	}
 
-	s.logger.Debug().
+	s.Logger.Debug().
 		Str("method", method).
 		Interface("params", params).
 		Msg("Making RPC call")
@@ -65,15 +78,10 @@ func (s *BaseMonitor) makeRPCCall(method string, params []interface{}) (*models.
 		return nil, err
 	}
 
-	req.Header.Set("Content-Type", "application/json")
-	if s.ApiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+s.ApiKey)
-	}
-
 	var response models.RPCResponse
 	err = s.Retry(func() error {
 
-		resp, err := s.client.Do(req)
+		resp, err := s.Client.Do(req)
 		if err != nil {
 			return err
 		}
@@ -93,7 +101,7 @@ func (s *BaseMonitor) makeRPCCall(method string, params []interface{}) (*models.
 		return nil
 	})
 	if err != nil {
-		s.logger.Error().
+		s.Logger.Error().
 			Err(err).
 			Str("method", method).
 			Interface("params", params).
@@ -106,11 +114,11 @@ func (s *BaseMonitor) makeRPCCall(method string, params []interface{}) (*models.
 
 func (b *BaseMonitor) Retry(fn func() error) error {
 	var err error
-	for i := 0; i < b.maxRetries; i++ {
+	for i := 0; i < b.MaxRetries; i++ {
 		if err = fn(); err == nil {
 			return nil
 		}
-		time.Sleep(b.retryDelay)
+		time.Sleep(b.RetryDelay)
 	}
 	return err
 }

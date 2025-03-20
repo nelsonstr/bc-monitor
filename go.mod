@@ -4,6 +4,7 @@ go 1.24
 
 require (
 	github.com/joho/godotenv v1.5.1
+	github.com/mr-tron/base58 v1.2.0
 	github.com/rs/zerolog v1.33.0
 	github.com/segmentio/kafka-go v0.4.47
 	golang.org/x/time v0.9.0
