@@ -154,20 +154,7 @@ func (s *SolanaMonitor) pollAccountChanges(address string) {
 	var lastKnownBalance uint64
 
 	for {
-		// Create request to get account info
-		//reqBody, err := json.Marshal(RPCRequest{
-		//	Jsonrpc: "2.0",
-		//	ID:      "1",
-		//	Method:  "getAccountInfo",
-		//	Params: []interface{}{
-		//		address,
-		//		map[string]interface{}{
-		//			"encoding":   "jsonParsed",
-		//			"commitment": "confirmed",
-		//		},
-		//	},
-		//})
-		var rpcResponse *RPCResponse
+		var rpcResponse *models.RPCResponse
 		var err error
 		rpcResponse, err = s.makeRPCCall("getAccountInfo", []interface{}{
 			address,
@@ -348,6 +335,7 @@ func (s *SolanaMonitor) processTransaction(tx SolanaTransaction, watchAddresses 
 				if len(tx.Meta.PreBalances) > 0 && len(tx.Meta.PostBalances) > 0 {
 					preBalance := tx.Meta.PreBalances[i]
 					postBalance := tx.Meta.PostBalances[i]
+
 					if preBalance > postBalance {
 						// Convert from lamports to SOL (1 SOL = 10^9 lamports)
 						amountLamports := preBalance - postBalance - tx.Meta.Fee

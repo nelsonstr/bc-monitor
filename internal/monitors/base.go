@@ -3,6 +3,7 @@ package monitors
 import (
 	"blockchain-monitor/internal/interfaces"
 	"blockchain-monitor/internal/logger"
+	"blockchain-monitor/internal/models"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -25,14 +26,14 @@ type BaseMonitor struct {
 	client *http.Client
 }
 
-func (s *BaseMonitor) makeRPCCall(method string, params []interface{}) (*RPCResponse, error) {
+func (s *BaseMonitor) makeRPCCall(method string, params []interface{}) (*models.RPCResponse, error) {
 	// Wait for rate limit
 	if err := s.rateLimiter.Wait(context.Background()); err != nil {
 		logger.Log.Error().Err(err).Msg("Rate limit error")
 		return nil, fmt.Errorf("rate limit error: %v", err)
 	}
 
-	request := RPCRequest{
+	request := models.RPCRequest{
 		Jsonrpc: "2.0",
 		ID:      "1",
 		Method:  method,
@@ -59,7 +60,7 @@ func (s *BaseMonitor) makeRPCCall(method string, params []interface{}) (*RPCResp
 		req.Header.Set("Authorization", "Bearer "+s.ApiKey)
 	}
 
-	var response RPCResponse
+	var response models.RPCResponse
 	err = s.Retry(func() error {
 
 		resp, err := s.client.Do(req)
