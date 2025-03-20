@@ -6,9 +6,11 @@ import (
 	"blockchain-monitor/internal/models"
 	"context"
 	"fmt"
+	"golang.org/x/time/rate"
 	"math/big"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,8 +24,52 @@ type EthereumMonitor struct {
 	BaseMonitor
 	client      *ethclient.Client
 	latestBlock uint64
-	MaxRetries  int
-	RetryDelay  time.Duration
+}
+
+var _ interfaces.BlockchainMonitor = (*EthereumMonitor)(nil)
+
+func NewEthereumMonitor() *EthereumMonitor {
+	rlRaw := os.Getenv("RATE_LIMIT")
+	rateLimit, err := strconv.Atoi(rlRaw)
+	if err != nil || rateLimit <= 0 {
+		rateLimit = 4
+	}
+	logger.Log.Info().
+		Int("rateLimit", rateLimit).
+		Msg("Rate limit set")
+
+	return &EthereumMonitor{
+		BaseMonitor: BaseMonitor{
+			RpcEndpoint: os.Getenv("ETHEREUM_RPC_ENDPOINT"),
+			ApiKey:      os.Getenv("ETHEREUM_API_KEY"),
+			Addresses:   []string{"0x00000000219ab540356cBB839Cbe05303d7705Fa"},
+			maxRetries:  1,
+			retryDelay:  2 * time.Second,
+			rateLimiter: rate.NewLimiter(rate.Limit(rateLimit), 1),
+		},
+	}
+}
+
+func (e *EthereumMonitor) Start(ctx context.Context, emitter interfaces.EventEmitter) error {
+	for {
+		select {
+		case <-ctx.Done():
+			logger.Log.Info().Msg("Ethereum monitor shutting down")
+			return nil
+		default:
+			e.EventEmitter = emitter
+
+			if err := e.Initialize(); err != nil {
+				logger.Log.Fatal().Err(err).Msg("Failed to initialize Ethereum monitor")
+				return err
+			}
+			if err := e.StartMonitoring(); err != nil {
+				logger.Log.Fatal().Err(err).Msg("Failed to start Ethereum monitoring")
+				return err
+			}
+			return nil
+		}
+	}
 }
 
 func (e *EthereumMonitor) Initialize() error {
@@ -115,24 +161,24 @@ func (e *EthereumMonitor) processBlock(blockNum uint64, watchAddresses map[commo
 	var block *types.Block
 	var err error
 
-	for attempt := 0; attempt <= e.MaxRetries; attempt++ {
+	for attempt := 0; attempt <= e.maxRetries; attempt++ {
 		block, err = e.client.BlockByNumber(context.Background(), big.NewInt(int64(blockNum)))
 		if err == nil {
 			break
 		}
 
-		if attempt < e.MaxRetries {
+		if attempt < e.maxRetries {
 			logger.Log.Warn().
 				Err(err).
 				Int("attempt", attempt+1).
 				Uint64("blockNumber", blockNum).
 				Msg("Failed to get Ethereum block. Retrying...")
-			time.Sleep(e.RetryDelay)
+			time.Sleep(e.retryDelay)
 		}
 	}
 
 	if err != nil {
-		return fmt.Errorf("failed to get Ethereum block %d after %d attempts: %v", blockNum, e.MaxRetries+1, err)
+		return fmt.Errorf("failed to get Ethereum block %d after %d attempts: %v", blockNum, e.maxRetries+1, err)
 	}
 
 	logger.Log.Info().
@@ -280,36 +326,13 @@ func (e *EthereumMonitor) getBalance(address string) (*big.Int, uint64, error) {
 	return balance, blockNumber, nil
 }
 
-func NewEthereumMonitor() *EthereumMonitor {
-	return &EthereumMonitor{
-		BaseMonitor: BaseMonitor{
-			RpcEndpoint: os.Getenv("ETHEREUM_RPC_ENDPOINT"),
-			ApiKey:      os.Getenv("ETHEREUM_API_KEY"),
-			Addresses:   []string{"0x00000000219ab540356cBB839Cbe05303d7705Fa"},
-		},
-		MaxRetries: 1,
-		RetryDelay: 2 * time.Second,
-	}
-}
-
-func (e *EthereumMonitor) Start(ctx context.Context, emitter interfaces.EventEmitter) error {
-	for {
-		select {
-		case <-ctx.Done():
-			logger.Log.Info().Msg("Ethereum monitor shutting down")
-			return nil
-		default:
-			e.EventEmitter = emitter
-
-			if err := e.Initialize(); err != nil {
-				logger.Log.Fatal().Err(err).Msg("Failed to initialize Ethereum monitor")
-				return err
-			}
-			if err := e.StartMonitoring(); err != nil {
-				logger.Log.Fatal().Err(err).Msg("Failed to start Ethereum monitoring")
-				return err
-			}
+func (b *EthereumMonitor) Retry(fn func() error) error {
+	var err error
+	for i := 0; i < b.maxRetries; i++ {
+		if err = fn(); err == nil {
 			return nil
 		}
+		time.Sleep(b.retryDelay)
 	}
+	return err
 }

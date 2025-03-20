@@ -13,40 +13,76 @@ import (
 	"os"
 	"strconv"
 
-	"bytes"
 	"time"
 )
 
 type BitcoinMonitor struct {
 	BaseMonitor
-	client          *http.Client
 	latestBlockHash string
-	MaxRetries      int
-	RetryDelay      time.Duration
 	blockHead       int64
-	rateLimiter     *rate.Limiter
 }
 
-type RPCRequest struct {
-	Jsonrpc string        `json:"jsonrpc"`
-	ID      string        `json:"id"`
-	Method  string        `json:"method"`
-	Params  []interface{} `json:"params"`
+var _ interfaces.BlockchainMonitor = (*BitcoinMonitor)(nil)
+
+func NewBitcoinMonitor() *BitcoinMonitor {
+	rlRaw := os.Getenv("RATE_LIMIT")
+	rateLimit, err := strconv.Atoi(rlRaw)
+	if err != nil || rateLimit <= 0 {
+		rateLimit = 4
+	}
+	logger.Log.Info().
+		Int("rateLimit", rateLimit).
+		Msg("Rate limit set")
+	return &BitcoinMonitor{
+		BaseMonitor: BaseMonitor{
+			RpcEndpoint: os.Getenv("BITCOIN_RPC_ENDPOINT"),
+			ApiKey:      os.Getenv("BITCOIN_API_KEY"),
+			Addresses:   []string{"bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh"},
+			maxRetries:  1,
+			retryDelay:  2 * time.Second,
+			rateLimiter: rate.NewLimiter(rate.Limit(rateLimit), 1),
+		},
+	}
 }
 
-type RPCResponse struct {
-	Jsonrpc string          `json:"jsonrpc"`
-	ID      string          `json:"id"`
-	Result  json.RawMessage `json:"result"`
-	Error   *struct {
-		Code    int    `json:"code"`
-		Message string `json:"message"`
-	} `json:"error,omitempty"`
+func (b *BitcoinMonitor) Start(ctx context.Context, emitter interfaces.EventEmitter) error {
+	for {
+		select {
+		case <-ctx.Done():
+			logger.Log.Info().
+				Str("chain", b.GetChainName()).
+				Msg("Shutting down")
+			return nil
+		default:
+			b.EventEmitter = emitter
+			// Initialize Bitcoin monitor
+			if err := b.Initialize(); err != nil {
+				logger.Log.Fatal().
+					Err(err).
+					Str("chain", b.GetChainName()).
+					Msg("Failed to initialize monitor")
+				return err
+			}
+			// Start monitoring Bitcoin blockchain
+			if err := b.StartMonitoring(); err != nil {
+				logger.Log.Fatal().
+					Err(err).
+					Str("chain", b.GetChainName()).
+					Msg("Failed to start monitoring")
+				return err
+			}
+			return nil
+		}
+	}
 }
 
 func (b *BitcoinMonitor) Initialize() error {
-	b.client = &http.Client{
-		Timeout: time.Second * 10,
+	b.BaseMonitor.client = &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &customTransport{
+			base:   http.DefaultTransport,
+			apiKey: b.ApiKey,
+		},
 	}
 
 	bestBlockHash, err := b.getBestBlockHash()
@@ -63,7 +99,7 @@ func (b *BitcoinMonitor) Initialize() error {
 	logger.Log.Info().
 		Str("blockHash", bestBlockHash).
 		Msg("Connected to Bitcoin node")
-
+	b.blockHead = blockHead
 	logger.Log.Info().
 		Int64("blockNumber", blockHead).
 		Msg("Connected to Bitcoin node")
@@ -72,105 +108,21 @@ func (b *BitcoinMonitor) Initialize() error {
 }
 
 func (b *BitcoinMonitor) getBestBlockHash() (string, error) {
-	return b.makeRPCCall("getbestblockhash", nil)
-}
-
-func (b *BitcoinMonitor) makeRPCCall(method string, params []interface{}) (string, error) {
-	// Wait for rate limit
-	if err := b.rateLimiter.Wait(context.Background()); err != nil {
-		logger.Log.Error().Err(err).Msg("Rate limit error")
-		return "", fmt.Errorf("rate limit error: %v", err)
-	}
-
-	request := RPCRequest{
-		Jsonrpc: "2.0",
-		ID:      "1",
-		Method:  method,
-		Params:  params,
-	}
-
-	payload, err := json.Marshal(request)
+	resp, err := b.makeRPCCall("getbestblockhash", nil)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal JSON payload: %v", err)
-	}
-
-	logger.Log.Debug().
-		Str("method", method).
-		Interface("params", params).
-		Msg("Making RPC call")
-
-	req, err := http.NewRequest("POST", b.RpcEndpoint, bytes.NewReader(payload))
-	if err != nil {
-		return "", fmt.Errorf("failed to create HTTP request: %v", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	if b.ApiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+b.ApiKey)
-	}
-
-	var response RPCResponse
-	err = b.retry(func() error {
-		res, err := b.client.Do(req)
-		if err != nil {
-			return fmt.Errorf("HTTP request failed: %v", err)
-		}
-		defer res.Body.Close()
-
-		if res.StatusCode != http.StatusOK {
-			return fmt.Errorf("HTTP error: %d - %s", res.StatusCode, res.Status)
-		}
-
-		if err := json.NewDecoder(res.Body).Decode(&response); err != nil {
-			return fmt.Errorf("failed to decode response: %v", err)
-		}
-
-		if response.Error != nil {
-			return fmt.Errorf("RPC error: %d - %s", response.Error.Code, response.Error.Message)
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		logger.Log.Error().
-			Err(err).
-			Str("method", method).
-			Interface("params", params).
-			Msg("RPC call failed")
 		return "", err
 	}
 
-	// Handle different result types
-	var result string
-	var resultInterface interface{}
-	if err := json.Unmarshal(response.Result, &resultInterface); err != nil {
-		return "", fmt.Errorf("failed to unmarshal result: %v", err)
+	var blockHash string
+	if err := json.Unmarshal(resp.Result, &blockHash); err != nil {
+		return "", err
 	}
 
-	switch v := resultInterface.(type) {
-	case string:
-		result = v
-	case float64:
-		result = strconv.FormatFloat(v, 'f', -1, 64)
-	case map[string]interface{}:
-		result = string(response.Result)
-	default:
-		return "", fmt.Errorf("unexpected result type: %T", v)
-	}
-
-	return result, nil
+	return blockHash, nil
 }
 
-func (b *BitcoinMonitor) retry(fn func() error) error {
-	var err error
-	for i := 0; i < b.MaxRetries; i++ {
-		if err = fn(); err == nil {
-			return nil
-		}
-		time.Sleep(b.RetryDelay)
-	}
-	return err
+func (b *BitcoinMonitor) GetChainName() string {
+	return "Bitcoin"
 }
 
 func (b *BitcoinMonitor) StartMonitoring() error {
@@ -179,12 +131,11 @@ func (b *BitcoinMonitor) StartMonitoring() error {
 		Str("chain", b.GetChainName()).
 		Str("rpcEndpoint", b.RpcEndpoint).
 		Msg("Starting monitoring")
+
 	logger.Log.Info().
 		Str("chain", b.GetChainName()).
 		Str("blockHash", b.latestBlockHash).
 		Msg("Latest block hash")
-
-	time.Sleep(5 * time.Second)
 
 	go b.monitorBlocks()
 
@@ -194,11 +145,19 @@ func (b *BitcoinMonitor) StartMonitoring() error {
 func (b *BitcoinMonitor) getBlockHead() (int64, error) {
 	result, err := b.makeRPCCall("getblockcount", nil)
 	if err != nil {
+
 		return 0, fmt.Errorf("failed to get current block number: %v", err)
 	}
-	height, err := strconv.ParseInt(result, 10, 0)
-	if err != nil {
-		return 0, fmt.Errorf("failed to parse block height: %v", err)
+
+	if result.Result == nil {
+
+		return 0, fmt.Errorf("RPC response did not contain block count")
+	}
+
+	var height int64
+	if err := json.Unmarshal(result.Result, &height); err != nil {
+
+		return 0, err
 	}
 
 	return height, nil
@@ -211,7 +170,9 @@ func (b *BitcoinMonitor) monitorBlocks() {
 			logger.Log.Error().
 				Err(err).
 				Msg("Failed to get current Bitcoin block hash")
+
 			time.Sleep(5 * time.Second)
+
 			continue
 		}
 
@@ -224,6 +185,7 @@ func (b *BitcoinMonitor) monitorBlocks() {
 			} else {
 				b.latestBlockHash = currentBlockHash
 				b.blockHead = blockHeight
+
 				logger.Log.Info().
 					Str("blockHash", currentBlockHash).
 					Msg("BTC - Updated to block")
@@ -283,7 +245,7 @@ func (b *BitcoinMonitor) getBlock(blockHash string) (*BlockDetails, error) {
 	}
 
 	var block BlockDetails
-	if err := json.Unmarshal([]byte(result), &block); err != nil {
+	if err := json.Unmarshal(result.Result, &block); err != nil {
 		return nil, err
 	}
 
@@ -297,16 +259,13 @@ func (b *BitcoinMonitor) getTransaction(txHash string) (*TransactionDetails, err
 		return nil, fmt.Errorf("RPC call failed: %v", err)
 	}
 
-	// Log the raw result for debugging
-	//log.Printf("Raw transaction result for %s: %s", txHash, result)
-
 	var tx TransactionDetails
-	if err := json.Unmarshal([]byte(result), &tx); err != nil {
+	if err := json.Unmarshal(result.Result, &tx); err != nil {
 		// Log the error and the result that caused it
 		logger.Log.Error().
 			Err(err).
 			Str("txHash", txHash).
-			Str("result", result).
+			Str("result", tx.TxHash).
 			Msg("Failed to unmarshal transaction")
 		return nil, fmt.Errorf("failed to parse transaction details: %v", err)
 	}
@@ -377,63 +336,6 @@ type ScriptPubKey struct {
 	Addresses []string `json:"addresses"`
 }
 
-func (b *BitcoinMonitor) GetChainName() string {
-	return "Bitcoin"
-}
-
 func (b *BitcoinMonitor) GetExplorerURL(txHash string) string {
 	return fmt.Sprintf("https://blockchair.com/bitcoin/transaction/%s", txHash)
-}
-
-func NewBitcoinMonitor() *BitcoinMonitor {
-	rlRaw := os.Getenv("RATE_LIMIT")
-	rateLimit, err := strconv.Atoi(rlRaw)
-	if err != nil || rateLimit <= 0 {
-		rateLimit = 4
-	}
-	logger.Log.Info().
-		Int("rateLimit", rateLimit).
-		Msg("Rate limit set")
-	return &BitcoinMonitor{
-		BaseMonitor: BaseMonitor{
-			RpcEndpoint: os.Getenv("BITCOIN_RPC_ENDPOINT"),
-			ApiKey:      os.Getenv("BITCOIN_API_KEY"),
-			Addresses:   []string{"bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh"},
-		},
-		MaxRetries: 1,
-		RetryDelay: 2 * time.Second,
-		// Create a rate limiter that allows 4 operations per second with a burst of 1. - max 5 RPS
-		rateLimiter: rate.NewLimiter(rate.Limit(rateLimit), 1),
-	}
-}
-
-func (b *BitcoinMonitor) Start(ctx context.Context, emitter interfaces.EventEmitter) error {
-	for {
-		select {
-		case <-ctx.Done():
-			logger.Log.Info().
-				Str("chain", b.GetChainName()).
-				Msg("Shutting down")
-			return nil
-		default:
-			b.EventEmitter = emitter
-			// Initialize Bitcoin monitor
-			if err := b.Initialize(); err != nil {
-				logger.Log.Fatal().
-					Err(err).
-					Str("chain", b.GetChainName()).
-					Msg("Failed to initialize monitor")
-				return err
-			}
-			// Start monitoring Bitcoin blockchain
-			if err := b.StartMonitoring(); err != nil {
-				logger.Log.Fatal().
-					Err(err).
-					Str("chain", b.GetChainName()).
-					Msg("Failed to start monitoring")
-				return err
-			}
-			return nil
-		}
-	}
 }

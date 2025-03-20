@@ -14,7 +14,7 @@ type PrintEmitter struct {
 
 // EmitEvent prints DB storage values and forwards to the wrapped emitter
 func (d *PrintEmitter) EmitEvent(event models.TransactionEvent) error {
-	// Print DB storage values
+	// Print  storage values
 	logger.Log.Info().
 		Str("chain", event.Chain).
 		Msg("DB STORAGE VALUES")

@@ -4,21 +4,20 @@ import (
 	"blockchain-monitor/internal/interfaces"
 	"blockchain-monitor/internal/logger"
 	"blockchain-monitor/internal/models"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
+	"golang.org/x/time/rate"
+
 	"net/http"
 	"os"
-
+	"strconv"
 	"time"
 )
 
 // SolanaMonitor implements BlockchainMonitor for Solana
 type SolanaMonitor struct {
 	BaseMonitor
-	client     *http.Client
 	latestSlot uint64
 }
 
@@ -59,10 +58,62 @@ type Meta struct {
 	PostBalances []uint64 `json:"postBalances"`
 }
 
-func (s *SolanaMonitor) Initialize() error {
-	s.client = &http.Client{
-		Timeout: 30 * time.Second,
+var _ interfaces.BlockchainMonitor = (*SolanaMonitor)(nil)
+
+func NewSolanaMonitor() *SolanaMonitor {
+	rlRaw := os.Getenv("RATE_LIMIT")
+	rateLimit, err := strconv.Atoi(rlRaw)
+	if err != nil || rateLimit <= 0 {
+		rateLimit = 4
 	}
+	logger.Log.Info().
+		Int("rateLimit", rateLimit).
+		Msg("Rate limit set")
+
+	return &SolanaMonitor{
+		BaseMonitor: BaseMonitor{
+			RpcEndpoint: os.Getenv("SOLANA_RPC_ENDPOINT"),
+			ApiKey:      os.Getenv("SOLANA_API_KEY"),
+			Addresses:   []string{"oQPnhXAbLbMuKHESaGrbXT17CyvWCpLyERSJA9HCYd7"},
+			maxRetries:  1,
+			retryDelay:  2 * time.Second,
+			rateLimiter: rate.NewLimiter(rate.Limit(rateLimit), 1),
+		},
+	}
+}
+
+func (s *SolanaMonitor) Start(ctx context.Context, emitter interfaces.EventEmitter) error {
+	for {
+		select {
+		case <-ctx.Done():
+			logger.Log.Info().Msg("Solana monitor shutting down")
+			return nil
+		default:
+			s.EventEmitter = emitter
+
+			if err := s.Initialize(); err != nil {
+				logger.Log.Fatal().Err(err).Msg("Failed to initialize Solana monitor")
+				return err
+			}
+			if err := s.StartMonitoring(); err != nil {
+				logger.Log.Fatal().Err(err).Msg("Failed to start Solana monitoring")
+				return err
+			}
+			return nil
+		}
+	}
+}
+
+func (s *SolanaMonitor) Initialize() error {
+	s.BaseMonitor.client = &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &customTransport{
+			base:   http.DefaultTransport,
+			apiKey: s.ApiKey,
+		},
+	}
+
+	// todo get blockhead
 
 	// Test connection
 	slot, err := s.getLatestSlot()
@@ -104,89 +155,59 @@ func (s *SolanaMonitor) pollAccountChanges(address string) {
 
 	for {
 		// Create request to get account info
-		reqBody, err := json.Marshal(SolanaRpcRequest{
-			Jsonrpc: "2.0",
-			ID:      1,
-			Method:  "getAccountInfo",
-			Params: []interface{}{
-				address,
-				map[string]interface{}{
-					"encoding":   "jsonParsed",
-					"commitment": "confirmed",
-				},
+		//reqBody, err := json.Marshal(RPCRequest{
+		//	Jsonrpc: "2.0",
+		//	ID:      "1",
+		//	Method:  "getAccountInfo",
+		//	Params: []interface{}{
+		//		address,
+		//		map[string]interface{}{
+		//			"encoding":   "jsonParsed",
+		//			"commitment": "confirmed",
+		//		},
+		//	},
+		//})
+		var rpcResponse *RPCResponse
+		var err error
+		rpcResponse, err = s.makeRPCCall("getAccountInfo", []interface{}{
+			address,
+			map[string]interface{}{
+				"encoding":   "jsonParsed",
+				"commitment": "confirmed",
 			},
 		})
 
 		if err != nil {
 			logger.Log.Error().
 				Err(err).
-				Msg("Error creating account info request")
+				Msg("Error making RPC call")
+
 			time.Sleep(backoff)
 			backoff = minDuration(backoff*2, maxBackoff)
-			continue
-		}
 
-		// Create HTTP request
-		req, err := http.NewRequest("POST", s.RpcEndpoint, bytes.NewBuffer(reqBody))
-		if err != nil {
-			logger.Log.Error().
-				Err(err).
-				Msg("Error creating HTTP request")
-			time.Sleep(backoff)
-			backoff = min(backoff*2, maxBackoff)
-			continue
-		}
-
-		// Add headers
-		req.Header.Set("Content-Type", "application/json")
-		if s.ApiKey != "" {
-			req.Header.Set("Authorization", "Bearer "+s.ApiKey)
-		}
-
-		// Send request
-		client := &http.Client{Timeout: 10 * time.Second}
-		resp, err := client.Do(req)
-		if err != nil {
-			logger.Log.Error().
-				Err(err).
-				Msg("Error sending HTTP request")
-			time.Sleep(backoff)
-			backoff = min(backoff*2, maxBackoff)
-			continue
-		}
-
-		// Read response
-		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			logger.Log.Error().
-				Err(err).
-				Msg("Error reading response body")
-			time.Sleep(backoff)
-			backoff = min(backoff*2, maxBackoff)
 			continue
 		}
 
 		// Parse response
 		var response struct {
-			Result struct {
-				Value struct {
-					Lamports uint64 `json:"lamports"`
-				} `json:"value"`
-			} `json:"result"`
+			Value struct {
+				Lamports uint64 `json:"lamports"`
+			} `json:"value"`
 		}
 
-		if err := json.Unmarshal(body, &response); err != nil {
+		if err := json.Unmarshal(rpcResponse.Result, &response); err != nil {
 			logger.Log.Error().
 				Err(err).
 				Msg("Error parsing response")
+
 			time.Sleep(backoff)
 			backoff = min(backoff*2, maxBackoff)
+
 			continue
 		}
 
 		// Check if balance changed
-		currentBalance := response.Result.Value.Lamports
+		currentBalance := response.Value.Lamports
 		if currentBalance != lastKnownBalance {
 			if lastKnownBalance > 0 {
 				balanceChange := int64(currentBalance) - int64(lastKnownBalance)
@@ -222,7 +243,7 @@ func (s *SolanaMonitor) pollAccountChanges(address string) {
 					Timestamp: txDetails.Timestamp,
 				}
 
-				// Print DB storage values
+				// Print storage values
 				logger.Log.Info().
 					Str("chain", event.Chain).
 					Str("from", event.From).
@@ -231,7 +252,7 @@ func (s *SolanaMonitor) pollAccountChanges(address string) {
 					Str("fees", event.Fees).
 					Str("txHash", event.TxHash).
 					Time("timestamp", event.Timestamp).
-					Msg("DB STORAGE VALUES")
+					Msg("STORAGE VALUES")
 
 				s.EventEmitter.EmitEvent(event)
 			} else {
@@ -262,7 +283,7 @@ func minDuration(a, b time.Duration) time.Duration {
 }
 
 func (s *SolanaMonitor) getLatestSlot() (uint64, error) {
-	resp, err := s.makeRpcRequest("getSlot", nil)
+	resp, err := s.makeRPCCall("getSlot", nil)
 	if err != nil {
 		return 0, err
 	}
@@ -276,17 +297,8 @@ func (s *SolanaMonitor) getLatestSlot() (uint64, error) {
 }
 
 func (s *SolanaMonitor) getBlock(slot uint64) ([]SolanaTransaction, error) {
-	//reqBody, err := json.Marshal(SolanaRpcRequest{
-	//	Jsonrpc: "2.0",
-	//	ID:      1,
-	//	Method:  "getBlock",
-	//	Params:
-	//})
-	//if err != nil {
-	//	return nil, err
-	//}
 
-	resp, err := s.makeRpcRequest("getBlock", []interface{}{
+	resp, err := s.makeRPCCall("getBlock", []interface{}{
 		slot,
 		map[string]interface{}{
 			"encoding":                       "json",
@@ -307,51 +319,6 @@ func (s *SolanaMonitor) getBlock(slot uint64) ([]SolanaTransaction, error) {
 	}
 
 	return blockResp.Transactions, nil
-}
-
-func (s *SolanaMonitor) makeRpcRequest(method string, params []interface{}) (*RPCResponse, error) {
-	request := RPCRequest{
-		Jsonrpc: "2.0",
-		ID:      "1",
-		Method:  method,
-		Params:  params,
-	}
-
-	payload, err := json.Marshal(request)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %v", err)
-	}
-
-	req, err := http.NewRequest("POST", s.RpcEndpoint, bytes.NewReader(payload))
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	if s.ApiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+s.ApiKey)
-	}
-
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP error: %d - %s", resp.StatusCode, resp.Status)
-	}
-
-	var response RPCResponse
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %v", err)
-	}
-
-	if response.Error != nil {
-		return nil, fmt.Errorf("RPC error: %d - %s", response.Error.Code, response.Error.Message)
-	}
-
-	return &response, nil
 }
 
 func (s *SolanaMonitor) processTransaction(tx SolanaTransaction, watchAddresses map[string]bool) {
@@ -439,7 +406,7 @@ func (s *SolanaMonitor) GetExplorerURL(txHash string) string {
 
 func (s *SolanaMonitor) getRecentTransactionDetails(address string) (TransactionDetails, error) {
 
-	resp, err := s.makeRpcRequest("getSignaturesForAddress", []interface{}{
+	resp, err := s.makeRPCCall("getSignaturesForAddress", []interface{}{
 		address,
 		map[string]interface{}{
 			"limit": 1,
@@ -462,7 +429,7 @@ func (s *SolanaMonitor) getRecentTransactionDetails(address string) (Transaction
 		return TransactionDetails{}, fmt.Errorf("no recent transactions found")
 	}
 
-	txResp, err := s.makeRpcRequest("getTransaction", []interface{}{
+	txResp, err := s.makeRPCCall("getTransaction", []interface{}{
 		signaturesResp[0].Signature,
 		map[string]interface{}{
 			"encoding": "jsonParsed",
@@ -488,36 +455,4 @@ func (s *SolanaMonitor) getRecentTransactionDetails(address string) (Transaction
 		TxHash:    signaturesResp[0].Signature,
 		Timestamp: time.Unix(signaturesResp[0].BlockTime, 0),
 	}, nil
-}
-
-func NewSolanaMonitor() *SolanaMonitor {
-	return &SolanaMonitor{
-		BaseMonitor: BaseMonitor{
-			RpcEndpoint: os.Getenv("SOLANA_RPC_ENDPOINT"),
-			ApiKey:      os.Getenv("SOLANA_API_KEY"),
-			Addresses:   []string{"oQPnhXAbLbMuKHESaGrbXT17CyvWCpLyERSJA9HCYd7"},
-		},
-	}
-}
-
-func (s *SolanaMonitor) Start(ctx context.Context, emitter interfaces.EventEmitter) error {
-	for {
-		select {
-		case <-ctx.Done():
-			logger.Log.Info().Msg("Solana monitor shutting down")
-			return nil
-		default:
-			s.EventEmitter = emitter
-
-			if err := s.Initialize(); err != nil {
-				logger.Log.Fatal().Err(err).Msg("Failed to initialize Solana monitor")
-				return err
-			}
-			if err := s.StartMonitoring(); err != nil {
-				logger.Log.Fatal().Err(err).Msg("Failed to start Solana monitoring")
-				return err
-			}
-			return nil
-		}
-	}
 }

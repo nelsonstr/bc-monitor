@@ -1,7 +1,6 @@
 package interfaces
 
 import (
-	"blockchain-monitor/internal/models"
 	"context"
 )
 
@@ -18,9 +17,4 @@ type BlockchainMonitor interface {
 	GetChainName() string
 
 	GetExplorerURL(txHash string) string
-}
-
-// EventEmitter defines the interface for emitting events
-type EventEmitter interface {
-	EmitEvent(event models.TransactionEvent) error
 }
