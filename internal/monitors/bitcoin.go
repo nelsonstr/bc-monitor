@@ -2,17 +2,16 @@ package monitors
 
 import (
 	"blockchain-monitor/internal/interfaces"
-	"blockchain-monitor/internal/logger"
 	"blockchain-monitor/internal/models"
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/rs/zerolog"
 
 	"golang.org/x/time/rate"
 	"net/http"
 	"os"
 	"strconv"
-
 	"time"
 )
 
@@ -24,15 +23,16 @@ type BitcoinMonitor struct {
 
 var _ interfaces.BlockchainMonitor = (*BitcoinMonitor)(nil)
 
-func NewBitcoinMonitor() *BitcoinMonitor {
+func NewBitcoinMonitor(log *zerolog.Logger) *BitcoinMonitor {
 	rlRaw := os.Getenv("RATE_LIMIT")
 	rateLimit, err := strconv.Atoi(rlRaw)
 	if err != nil || rateLimit <= 0 {
 		rateLimit = 4
 	}
-	logger.Log.Info().
+	log.Info().
 		Int("rateLimit", rateLimit).
 		Msg("Rate limit set")
+
 	return &BitcoinMonitor{
 		BaseMonitor: BaseMonitor{
 			RpcEndpoint: os.Getenv("BITCOIN_RPC_ENDPOINT"),
@@ -41,6 +41,7 @@ func NewBitcoinMonitor() *BitcoinMonitor {
 			maxRetries:  1,
 			retryDelay:  2 * time.Second,
 			rateLimiter: rate.NewLimiter(rate.Limit(rateLimit), 1),
+			logger:      log,
 		},
 	}
 }
@@ -49,7 +50,7 @@ func (b *BitcoinMonitor) Start(ctx context.Context, emitter interfaces.EventEmit
 	for {
 		select {
 		case <-ctx.Done():
-			logger.Log.Info().
+			b.logger.Info().
 				Str("chain", b.GetChainName()).
 				Msg("Shutting down")
 			return nil
@@ -57,7 +58,7 @@ func (b *BitcoinMonitor) Start(ctx context.Context, emitter interfaces.EventEmit
 			b.EventEmitter = emitter
 			// Initialize Bitcoin monitor
 			if err := b.Initialize(); err != nil {
-				logger.Log.Fatal().
+				b.logger.Fatal().
 					Err(err).
 					Str("chain", b.GetChainName()).
 					Msg("Failed to initialize monitor")
@@ -65,7 +66,7 @@ func (b *BitcoinMonitor) Start(ctx context.Context, emitter interfaces.EventEmit
 			}
 			// Start monitoring Bitcoin blockchain
 			if err := b.StartMonitoring(); err != nil {
-				logger.Log.Fatal().
+				b.logger.Fatal().
 					Err(err).
 					Str("chain", b.GetChainName()).
 					Msg("Failed to start monitoring")
@@ -96,11 +97,11 @@ func (b *BitcoinMonitor) Initialize() error {
 	}
 
 	b.latestBlockHash = bestBlockHash
-	logger.Log.Info().
+	b.logger.Info().
 		Str("blockHash", bestBlockHash).
 		Msg("Connected to Bitcoin node")
 	b.blockHead = blockHead
-	logger.Log.Info().
+	b.logger.Info().
 		Int64("blockNumber", blockHead).
 		Msg("Connected to Bitcoin node")
 
@@ -127,12 +128,12 @@ func (b *BitcoinMonitor) GetChainName() string {
 
 func (b *BitcoinMonitor) StartMonitoring() error {
 
-	logger.Log.Info().
+	b.logger.Info().
 		Str("chain", b.GetChainName()).
 		Str("rpcEndpoint", b.RpcEndpoint).
 		Msg("Starting monitoring")
 
-	logger.Log.Info().
+	b.logger.Info().
 		Str("chain", b.GetChainName()).
 		Str("blockHash", b.latestBlockHash).
 		Msg("Latest block hash")
@@ -167,7 +168,7 @@ func (b *BitcoinMonitor) monitorBlocks() {
 	for {
 		currentBlockHash, err := b.getBestBlockHash()
 		if err != nil {
-			logger.Log.Error().
+			b.logger.Error().
 				Err(err).
 				Msg("Failed to get current Bitcoin block hash")
 
@@ -178,7 +179,7 @@ func (b *BitcoinMonitor) monitorBlocks() {
 
 		if currentBlockHash != b.latestBlockHash {
 			if blockHeight, err := b.processBlock(currentBlockHash); err != nil {
-				logger.Log.Error().
+				b.logger.Error().
 					Err(err).
 					Str("blockHash", currentBlockHash).
 					Msg("BTC - Error processing block")
@@ -186,7 +187,7 @@ func (b *BitcoinMonitor) monitorBlocks() {
 				b.latestBlockHash = currentBlockHash
 				b.blockHead = blockHeight
 
-				logger.Log.Info().
+				b.logger.Info().
 					Str("blockHash", currentBlockHash).
 					Msg("BTC - Updated to block")
 			}
@@ -202,14 +203,14 @@ func (b *BitcoinMonitor) processBlock(blockHash string) (int64, error) {
 		return 0, fmt.Errorf("Bitcoin - failed to get block details: %v", err)
 	}
 
-	logger.Log.Info().
+	b.logger.Info().
 		Str("blockHash", blockHash).
 		Int("txCount", len(block.Tx)).
 		Msg("Processing Bitcoin block")
 
 	for _, tx := range block.Tx {
 		if err := b.processTransaction(tx); err != nil {
-			logger.Log.Error().
+			b.logger.Error().
 				Err(err).
 				Str("txHash", tx).
 				Msg("Error processing transaction")
@@ -261,8 +262,8 @@ func (b *BitcoinMonitor) getTransaction(txHash string) (*TransactionDetails, err
 
 	var tx TransactionDetails
 	if err := json.Unmarshal(result.Result, &tx); err != nil {
-		// Log the error and the result that caused it
-		logger.Log.Error().
+		// GetLogger the error and the result that caused it
+		b.logger.Error().
 			Err(err).
 			Str("txHash", txHash).
 			Str("result", tx.TxHash).
@@ -299,7 +300,7 @@ func (b *BitcoinMonitor) emitTransactionEvent(tx *TransactionDetails, address st
 	}
 
 	if err := b.EventEmitter.EmitEvent(event); err != nil {
-		logger.Log.Error().
+		b.logger.Error().
 			Err(err).
 			Str("txid", tx.Txid).
 			Msg("Failed to emit event for transaction")

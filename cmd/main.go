@@ -17,9 +17,10 @@ import (
 
 func main() {
 	logger.Init("info") // Initialize zerolog
+	log := logger.GetLogger()
 
 	if err := godotenv.Load(); err != nil {
-		logger.Log.Fatal().Err(err).Msg("Error loading .env file")
+		log.Fatal().Err(err).Msg("Error loading .env file")
 	}
 
 	// Create a context that we can cancel
@@ -33,19 +34,21 @@ func main() {
 	}
 
 	// Create monitors
-	ethereumMonitor := monitors.NewEthereumMonitor()
-	bitcoinMonitor := monitors.NewBitcoinMonitor()
-	solanaMonitor := monitors.NewSolanaMonitor()
+	ethereumMonitor := monitors.NewEthereumMonitor(log)
+	bitcoinMonitor := monitors.NewBitcoinMonitor(log)
+	solanaMonitor := monitors.NewSolanaMonitor(log)
 
 	// Create a custom emitter that wraps the Kafka emitter and prints DB values
-	printEmitter := &events.PrintEmitter{
-		WrappedEmitter: kafkaEmitter,
-		Monitors: map[string]interfaces.BlockchainMonitor{
+
+	printEmitter := events.NewPrintEmitter(
+		kafkaEmitter,
+		map[string]interfaces.BlockchainMonitor{
 			ethereumMonitor.GetChainName(): ethereumMonitor,
 			bitcoinMonitor.GetChainName():  bitcoinMonitor,
 			solanaMonitor.GetChainName():   solanaMonitor,
 		},
-	}
+		log,
+	)
 
 	// WaitGroup to wait for all goroutines to finish
 	var wg sync.WaitGroup
@@ -57,7 +60,7 @@ func main() {
 		go func(m interfaces.BlockchainMonitor) {
 			defer wg.Done()
 			if err := m.Start(ctx, printEmitter); err != nil {
-				logger.Log.Error().Err(err).Str("chain", m.GetChainName()).Msg("Error starting monitoring")
+				log.Error().Err(err).Str("chain", m.GetChainName()).Msg("Error starting monitoring")
 			}
 		}(monitor)
 	}
@@ -72,7 +75,7 @@ func main() {
 
 	// Wait for interrupt signal
 	<-sigChan
-	logger.Log.Info().Msg("Received shutdown signal. Initiating graceful shutdown...")
+	log.Info().Msg("Received shutdown signal. Initiating graceful shutdown...")
 
 	// Cancel the context to signal all goroutines to stop
 	cancel()
@@ -86,15 +89,15 @@ func main() {
 
 	select {
 	case <-waitChan:
-		logger.Log.Info().Msg("All monitors have shut down gracefully")
+		log.Info().Msg("All monitors have shut down gracefully")
 	case <-time.After(30 * time.Second):
-		logger.Log.Warn().Msg("Shutdown timed out after 30 seconds")
+		log.Warn().Msg("Shutdown timed out after 30 seconds")
 	}
 
 	// Perform any necessary cleanup
 	if err := kafkaEmitter.Close(); err != nil {
-		logger.Log.Error().Err(err).Msg("Error closing Kafka emitter")
+		log.Error().Err(err).Msg("Error closing Kafka emitter")
 	}
 
-	logger.Log.Info().Msg("Shutdown complete")
+	log.Info().Msg("Shutdown complete")
 }

@@ -3,11 +3,12 @@ package logger
 import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+
 	"os"
 	"time"
 )
 
-var Log zerolog.Logger
+var logger zerolog.Logger
 
 func Init(level string) {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
@@ -29,5 +30,9 @@ func Init(level string) {
 		zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	}
 
-	Log = log.With().Caller().Logger()
+	logger = log.With().Caller().Logger()
+}
+
+func GetLogger() *zerolog.Logger {
+	return &logger
 }

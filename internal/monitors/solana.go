@@ -2,11 +2,11 @@ package monitors
 
 import (
 	"blockchain-monitor/internal/interfaces"
-	"blockchain-monitor/internal/logger"
 	"blockchain-monitor/internal/models"
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/rs/zerolog"
 	"golang.org/x/time/rate"
 
 	"net/http"
@@ -60,13 +60,13 @@ type Meta struct {
 
 var _ interfaces.BlockchainMonitor = (*SolanaMonitor)(nil)
 
-func NewSolanaMonitor() *SolanaMonitor {
+func NewSolanaMonitor(log *zerolog.Logger) *SolanaMonitor {
 	rlRaw := os.Getenv("RATE_LIMIT")
 	rateLimit, err := strconv.Atoi(rlRaw)
 	if err != nil || rateLimit <= 0 {
 		rateLimit = 4
 	}
-	logger.Log.Info().
+	log.Info().
 		Int("rateLimit", rateLimit).
 		Msg("Rate limit set")
 
@@ -78,6 +78,7 @@ func NewSolanaMonitor() *SolanaMonitor {
 			maxRetries:  1,
 			retryDelay:  2 * time.Second,
 			rateLimiter: rate.NewLimiter(rate.Limit(rateLimit), 1),
+			logger:      log,
 		},
 	}
 }
@@ -86,17 +87,17 @@ func (s *SolanaMonitor) Start(ctx context.Context, emitter interfaces.EventEmitt
 	for {
 		select {
 		case <-ctx.Done():
-			logger.Log.Info().Msg("Solana monitor shutting down")
+			s.logger.Info().Msg("Solana monitor shutting down")
 			return nil
 		default:
 			s.EventEmitter = emitter
 
 			if err := s.Initialize(); err != nil {
-				logger.Log.Fatal().Err(err).Msg("Failed to initialize Solana monitor")
+				s.logger.Fatal().Err(err).Msg("Failed to initialize Solana monitor")
 				return err
 			}
 			if err := s.StartMonitoring(); err != nil {
-				logger.Log.Fatal().Err(err).Msg("Failed to start Solana monitoring")
+				s.logger.Fatal().Err(err).Msg("Failed to start Solana monitoring")
 				return err
 			}
 			return nil
@@ -122,7 +123,7 @@ func (s *SolanaMonitor) Initialize() error {
 	}
 
 	s.latestSlot = slot
-	logger.Log.Info().
+	s.logger.Info().
 		Int("addressCount", len(s.Addresses)).
 		Msg("Starting Solana monitoring")
 	return nil
@@ -133,7 +134,7 @@ func (s *SolanaMonitor) GetChainName() string {
 }
 
 func (s *SolanaMonitor) StartMonitoring() error {
-	logger.Log.Info().
+	s.logger.Info().
 		Int("addressCount", len(s.Addresses)).
 		Msg("Starting Solana monitoring")
 
@@ -165,7 +166,7 @@ func (s *SolanaMonitor) pollAccountChanges(address string) {
 		})
 
 		if err != nil {
-			logger.Log.Error().
+			s.logger.Error().
 				Err(err).
 				Msg("Error making RPC call")
 
@@ -183,7 +184,7 @@ func (s *SolanaMonitor) pollAccountChanges(address string) {
 		}
 
 		if err := json.Unmarshal(rpcResponse.Result, &response); err != nil {
-			logger.Log.Error().
+			s.logger.Error().
 				Err(err).
 				Msg("Error parsing response")
 
@@ -203,7 +204,7 @@ func (s *SolanaMonitor) pollAccountChanges(address string) {
 				// Fetch recent transactions to get details
 				txDetails, err := s.getRecentTransactionDetails(address)
 				if err != nil {
-					logger.Log.Error().
+					s.logger.Error().
 						Err(err).
 						Msg("Error fetching transaction details")
 				}
@@ -231,7 +232,7 @@ func (s *SolanaMonitor) pollAccountChanges(address string) {
 				}
 
 				// Print storage values
-				logger.Log.Info().
+				s.logger.Info().
 					Str("chain", event.Chain).
 					Str("from", event.From).
 					Str("to", event.To).
@@ -243,7 +244,7 @@ func (s *SolanaMonitor) pollAccountChanges(address string) {
 
 				s.EventEmitter.EmitEvent(event)
 			} else {
-				logger.Log.Info().
+				s.logger.Info().
 					Str("address", address).
 					Uint64("balance", currentBalance).
 					Float64("balanceSOL", float64(currentBalance)/1000000000).
@@ -343,7 +344,7 @@ func (s *SolanaMonitor) processTransaction(tx SolanaTransaction, watchAddresses 
 					}
 				}
 
-				logger.Log.Info().
+				s.logger.Info().
 					Str("address", account).
 					Msg("Detected outgoing transaction from watched address")
 			} else {
@@ -362,7 +363,7 @@ func (s *SolanaMonitor) processTransaction(tx SolanaTransaction, watchAddresses 
 					}
 				}
 
-				logger.Log.Info().
+				s.logger.Info().
 					Str("address", account).
 					Msg("Detected incoming transaction to watched address")
 			}

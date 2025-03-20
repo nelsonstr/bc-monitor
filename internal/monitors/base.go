@@ -2,12 +2,12 @@ package monitors
 
 import (
 	"blockchain-monitor/internal/interfaces"
-	"blockchain-monitor/internal/logger"
 	"blockchain-monitor/internal/models"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/rs/zerolog"
 	"golang.org/x/time/rate"
 	"net/http"
 	"time"
@@ -23,13 +23,23 @@ type BaseMonitor struct {
 	retryDelay   time.Duration
 	rateLimiter  *rate.Limiter
 
+	logger *zerolog.Logger
+
 	client *http.Client
+}
+
+func NewBaseMonitor(addresses []string, rpcClient *http.Client, logger *zerolog.Logger) *BaseMonitor {
+	return &BaseMonitor{
+		logger:    logger,
+		Addresses: addresses,
+		client:    rpcClient,
+	}
 }
 
 func (s *BaseMonitor) makeRPCCall(method string, params []interface{}) (*models.RPCResponse, error) {
 	// Wait for rate limit
 	if err := s.rateLimiter.Wait(context.Background()); err != nil {
-		logger.Log.Error().Err(err).Msg("Rate limit error")
+		s.logger.Error().Err(err).Msg("Rate limit error")
 		return nil, fmt.Errorf("rate limit error: %v", err)
 	}
 
@@ -45,7 +55,7 @@ func (s *BaseMonitor) makeRPCCall(method string, params []interface{}) (*models.
 		return nil, fmt.Errorf("failed to marshal request: %v", err)
 	}
 
-	logger.Log.Debug().
+	s.logger.Debug().
 		Str("method", method).
 		Interface("params", params).
 		Msg("Making RPC call")
@@ -83,7 +93,7 @@ func (s *BaseMonitor) makeRPCCall(method string, params []interface{}) (*models.
 		return nil
 	})
 	if err != nil {
-		logger.Log.Error().
+		s.logger.Error().
 			Err(err).
 			Str("method", method).
 			Interface("params", params).

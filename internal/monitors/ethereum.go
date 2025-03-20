@@ -2,11 +2,11 @@ package monitors
 
 import (
 	"blockchain-monitor/internal/interfaces"
-	"blockchain-monitor/internal/logger"
 	"blockchain-monitor/internal/models"
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/rs/zerolog"
 	"golang.org/x/time/rate"
 	"math/big"
 	"net/http"
@@ -53,13 +53,13 @@ type EthereumTransaction struct {
 
 var _ interfaces.BlockchainMonitor = (*EthereumMonitor)(nil)
 
-func NewEthereumMonitor() *EthereumMonitor {
+func NewEthereumMonitor(log *zerolog.Logger) *EthereumMonitor {
 	rlRaw := os.Getenv("RATE_LIMIT")
 	rateLimit, err := strconv.Atoi(rlRaw)
 	if err != nil || rateLimit <= 0 {
 		rateLimit = 4
 	}
-	logger.Log.Info().
+	log.Info().
 		Int("rateLimit", rateLimit).
 		Msg("Rate limit set")
 
@@ -71,6 +71,7 @@ func NewEthereumMonitor() *EthereumMonitor {
 			maxRetries:  1,
 			retryDelay:  2 * time.Second,
 			rateLimiter: rate.NewLimiter(rate.Limit(rateLimit), 1),
+			logger:      log,
 		},
 	}
 }
@@ -79,17 +80,17 @@ func (e *EthereumMonitor) Start(ctx context.Context, emitter interfaces.EventEmi
 	for {
 		select {
 		case <-ctx.Done():
-			logger.Log.Info().Msg("Ethereum monitor shutting down")
+			e.logger.Info().Msg("Ethereum monitor shutting down")
 			return nil
 		default:
 			e.EventEmitter = emitter
 
 			if err := e.Initialize(); err != nil {
-				logger.Log.Fatal().Err(err).Msg("Failed to initialize Ethereum monitor")
+				e.logger.Fatal().Err(err).Msg("Failed to initialize Ethereum monitor")
 				return err
 			}
 			if err := e.StartMonitoring(); err != nil {
-				logger.Log.Fatal().Err(err).Msg("Failed to start Ethereum monitoring")
+				e.logger.Fatal().Err(err).Msg("Failed to start Ethereum monitoring")
 				return err
 			}
 			return nil
@@ -113,17 +114,17 @@ func (e *EthereumMonitor) GetChainName() string {
 }
 
 func (e *EthereumMonitor) StartMonitoring() error {
-	logger.Log.Info().
+	e.logger.Info().
 		Int("addressCount", len(e.Addresses)).
 		Msg("Starting Ethereum monitoring")
 
 	for _, address := range e.Addresses {
 		balance, blockNumber, err := e.getBalance(address)
 		if err != nil {
-			logger.Log.Error().Err(err).Str("address", address).Msg("Error getting initial balance")
+			e.logger.Error().Err(err).Str("address", address).Msg("Error getting initial balance")
 		} else {
 			ethBalance := new(big.Float).Quo(new(big.Float).SetInt(balance), big.NewFloat(1e18))
-			logger.Log.Info().
+			e.logger.Info().
 				Str("address", address).
 				Str("balance", ethBalance.Text('f', 18)).
 				Uint64("blockNumber", blockNumber).
@@ -142,7 +143,7 @@ func (e *EthereumMonitor) StartMonitoring() error {
 	}
 
 	e.latestBlock = latestBlock
-	logger.Log.Info().
+	e.logger.Info().
 		Uint64("blockNumber", latestBlock).
 		Msg("Starting Ethereum monitoring from block")
 
@@ -161,7 +162,7 @@ func (e *EthereumMonitor) getLatestBlockNumber() (uint64, error) {
 	var blockNumberHex string
 
 	if err := json.Unmarshal(result.Result, &blockNumberHex); err != nil {
-		logger.Log.Error().
+		e.logger.Error().
 			Err(err).
 			Msg("Error parsing response")
 
@@ -188,7 +189,7 @@ func (e *EthereumMonitor) getBalance(address string) (*big.Int, uint64, error) {
 	var balanceHex string
 
 	if err := json.Unmarshal(result.Result, &balanceHex); err != nil {
-		logger.Log.Error().
+		e.logger.Error().
 			Err(err).
 			Msg("Error parsing response")
 
@@ -213,7 +214,7 @@ func (e *EthereumMonitor) monitorBlocks(watchAddresses map[string]bool) {
 	for {
 		currentBlock, err := e.getLatestBlockNumber()
 		if err != nil {
-			logger.Log.Error().Err(err).Msg("Failed to get current Ethereum block")
+			e.logger.Error().Err(err).Msg("Failed to get current Ethereum block")
 			time.Sleep(5 * time.Second)
 
 			continue
@@ -221,7 +222,7 @@ func (e *EthereumMonitor) monitorBlocks(watchAddresses map[string]bool) {
 
 		for blockNum := e.latestBlock + 1; blockNum <= currentBlock; blockNum++ {
 			if err := e.processBlock(blockNum, watchAddresses); err != nil {
-				logger.Log.Error().Err(err).Uint64("blockNumber", blockNum).Msg("Error processing Ethereum block")
+				e.logger.Error().Err(err).Uint64("blockNumber", blockNum).Msg("Error processing Ethereum block")
 
 				continue
 			}
@@ -244,7 +245,7 @@ func (e *EthereumMonitor) processBlock(blockNum uint64, watchAddresses map[strin
 		return fmt.Errorf("failed to parse block details: %w", err)
 	}
 
-	logger.Log.Info().
+	e.logger.Info().
 		Uint64("blockNumber", blockNum).
 		Int("transactionCount", len(blockDetails.Transactions)).
 		Msg("Processing Ethereum block")
@@ -257,7 +258,7 @@ func (e *EthereumMonitor) processBlock(blockNum uint64, watchAddresses map[strin
 	for i, tx := range blockDetails.Transactions {
 
 		if err := e.processSingleTransaction(tx, watchAddresses, timestamp); err != nil {
-			logger.Log.Warn().
+			e.logger.Warn().
 				Err(err).
 				Int("index", i).
 				Str("txHash", tx.Hash).
@@ -265,13 +266,13 @@ func (e *EthereumMonitor) processBlock(blockNum uint64, watchAddresses map[strin
 			continue
 		}
 
-		logger.Log.Debug().
+		e.logger.Debug().
 			Int("index", i).
 			Str("txHash", tx.Hash).
 			Msg("Successfully processed transaction")
 	}
 
-	logger.Log.Info().
+	e.logger.Info().
 		Uint64("blockNumber", blockNum).
 		Msg("Finished processing Ethereum block")
 
@@ -286,13 +287,13 @@ func (e *EthereumMonitor) processSingleTransaction(tx EthereumTransaction, watch
 		event := e.processTransaction(tx, from, to, blockTime)
 		if e.EventEmitter != nil {
 			e.EventEmitter.EmitEvent(event)
-			logger.Log.Info().
+			e.logger.Info().
 				Str("from", from).
 				Str("to", to).
 				Str("txHash", tx.Hash).
 				Msg("Emitted transaction event")
 		} else {
-			logger.Log.Warn().Msg("EventEmitter is nil, cannot emit event")
+			e.logger.Warn().Msg("EventEmitter is nil, cannot emit event")
 		}
 	}
 

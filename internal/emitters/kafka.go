@@ -31,7 +31,7 @@ func (k *KafkaEmitter) EmitEvent(event models.TransactionEvent) error {
 		return fmt.Errorf("failed to write message to Kafka: %v", err)
 	}
 
-	logger.Log.Info().
+	logger.GetLogger().Info().
 		Str("chain", event.Chain).
 		Str("txHash", event.TxHash).
 		Msg("Successfully emitted event to Kafka")
