@@ -10,7 +10,6 @@ import (
 	"golang.org/x/time/rate"
 	"math/big"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -53,20 +52,12 @@ type EthereumTransaction struct {
 
 var _ interfaces.BlockchainMonitor = (*EthereumMonitor)(nil)
 
-func NewEthereumMonitor(log *zerolog.Logger) *EthereumMonitor {
-	rlRaw := os.Getenv("RATE_LIMIT")
-	rateLimit, err := strconv.Atoi(rlRaw)
-	if err != nil || rateLimit <= 0 {
-		rateLimit = 4
-	}
-	log.Info().
-		Int("rateLimit", rateLimit).
-		Msg("Rate limit set")
+func NewEthereumMonitor(endpoint string, apiKey string, rateLimit float64, log *zerolog.Logger) *EthereumMonitor {
 
 	return &EthereumMonitor{
 		BaseMonitor: BaseMonitor{
-			RpcEndpoint: os.Getenv("ETHEREUM_RPC_ENDPOINT"),
-			ApiKey:      os.Getenv("ETHEREUM_API_KEY"),
+			RpcEndpoint: endpoint,
+			ApiKey:      apiKey,
 			Addresses:   []string{"0x00000000219ab540356cBB839Cbe05303d7705Fa"},
 			maxRetries:  1,
 			retryDelay:  2 * time.Second,

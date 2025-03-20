@@ -10,8 +10,6 @@ import (
 	"golang.org/x/time/rate"
 
 	"net/http"
-	"os"
-	"strconv"
 	"time"
 )
 
@@ -60,20 +58,12 @@ type Meta struct {
 
 var _ interfaces.BlockchainMonitor = (*SolanaMonitor)(nil)
 
-func NewSolanaMonitor(log *zerolog.Logger) *SolanaMonitor {
-	rlRaw := os.Getenv("RATE_LIMIT")
-	rateLimit, err := strconv.Atoi(rlRaw)
-	if err != nil || rateLimit <= 0 {
-		rateLimit = 4
-	}
-	log.Info().
-		Int("rateLimit", rateLimit).
-		Msg("Rate limit set")
+func NewSolanaMonitor(endpoint string, apiKey string, rateLimit float64, log *zerolog.Logger) *SolanaMonitor {
 
 	return &SolanaMonitor{
 		BaseMonitor: BaseMonitor{
-			RpcEndpoint: os.Getenv("SOLANA_RPC_ENDPOINT"),
-			ApiKey:      os.Getenv("SOLANA_API_KEY"),
+			RpcEndpoint: endpoint,
+			ApiKey:      apiKey,
 			Addresses:   []string{"oQPnhXAbLbMuKHESaGrbXT17CyvWCpLyERSJA9HCYd7"},
 			maxRetries:  1,
 			retryDelay:  2 * time.Second,

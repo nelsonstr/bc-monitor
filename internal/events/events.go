@@ -34,19 +34,16 @@ func (d *PrintEmitter) EmitEvent(event models.TransactionEvent) error {
 
 	d.logger.Info().
 		Str("chain", event.Chain).
-		Str("from", event.From).
-		Str("to", event.To).
+		Str("source", event.From).
+		Str("destination", event.To).
 		Str("amount", event.Amount).
 		Str("fees", event.Fees).
-		Str("txHash", event.TxHash).
 		Time("timestamp", event.Timestamp).
-		Msg("Transaction details")
+		Msg("Transaction details -->")
 
 	// Print chain-specific information
 	if monitor, ok := d.Monitors[event.Chain]; ok {
 		d.logger.Info().
-			Str("chain", event.Chain).
-			Str("network", "mainnet").
 			Str("explorer", monitor.GetExplorerURL(event.TxHash)).
 			Msg("Chain-specific information")
 	}

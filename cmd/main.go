@@ -10,6 +10,7 @@ import (
 	"github.com/joho/godotenv"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -17,10 +18,9 @@ import (
 
 func main() {
 	logger.Init("info") // Initialize zerolog
-	log := logger.GetLogger()
 
 	if err := godotenv.Load(); err != nil {
-		log.Fatal().Err(err).Msg("Error loading .env file")
+		logger.GetLogger().Fatal().Err(err).Msg("Error loading .env file")
 	}
 
 	// Create a context that we can cancel
@@ -33,10 +33,26 @@ func main() {
 		Topic:         os.Getenv("KAFKA_TOPIC"),
 	}
 
+	rateLimit := getRateLimit()
+
 	// Create monitors
-	ethereumMonitor := monitors.NewEthereumMonitor(log)
-	bitcoinMonitor := monitors.NewBitcoinMonitor(log)
-	solanaMonitor := monitors.NewSolanaMonitor(log)
+	bitcoinMonitor := monitors.NewBitcoinMonitor(
+		os.Getenv("BITCOIN_RPC_ENDPOINT"),
+		os.Getenv("BITCOIN_API_KEY"),
+		rateLimit,
+		logger.GetLogger())
+
+	ethereumMonitor := monitors.NewEthereumMonitor(
+		os.Getenv("ETHEREUM_RPC_ENDPOINT"),
+		os.Getenv("ETHEREUM_API_KEY"),
+		rateLimit,
+		logger.GetLogger())
+
+	solanaMonitor := monitors.NewSolanaMonitor(
+		os.Getenv("SOLANA_RPC_ENDPOINT"),
+		os.Getenv("SOLANA_API_KEY"),
+		rateLimit,
+		logger.GetLogger())
 
 	// Create a custom emitter that wraps the Kafka emitter and prints DB values
 
@@ -47,7 +63,7 @@ func main() {
 			bitcoinMonitor.GetChainName():  bitcoinMonitor,
 			solanaMonitor.GetChainName():   solanaMonitor,
 		},
-		log,
+		logger.GetLogger(),
 	)
 
 	// WaitGroup to wait for all goroutines to finish
@@ -60,7 +76,7 @@ func main() {
 		go func(m interfaces.BlockchainMonitor) {
 			defer wg.Done()
 			if err := m.Start(ctx, printEmitter); err != nil {
-				log.Error().Err(err).Str("chain", m.GetChainName()).Msg("Error starting monitoring")
+				logger.GetLogger().Error().Err(err).Str("chain", m.GetChainName()).Msg("Error starting monitoring")
 			}
 		}(monitor)
 	}
@@ -75,7 +91,7 @@ func main() {
 
 	// Wait for interrupt signal
 	<-sigChan
-	log.Info().Msg("Received shutdown signal. Initiating graceful shutdown...")
+	logger.GetLogger().Info().Msg("Received shutdown signal. Initiating graceful shutdown...")
 
 	// Cancel the context to signal all goroutines to stop
 	cancel()
@@ -89,15 +105,28 @@ func main() {
 
 	select {
 	case <-waitChan:
-		log.Info().Msg("All monitors have shut down gracefully")
+		logger.GetLogger().Info().Msg("All monitors have shut down gracefully")
 	case <-time.After(30 * time.Second):
-		log.Warn().Msg("Shutdown timed out after 30 seconds")
+		logger.GetLogger().Warn().Msg("Shutdown timed out after 30 seconds")
 	}
 
 	// Perform any necessary cleanup
 	if err := kafkaEmitter.Close(); err != nil {
-		log.Error().Err(err).Msg("Error closing Kafka emitter")
+		logger.GetLogger().Error().Err(err).Msg("Error closing Kafka emitter")
 	}
 
-	log.Info().Msg("Shutdown complete")
+	logger.GetLogger().Info().Msg("Shutdown complete")
+}
+
+func getRateLimit() float64 {
+	rlRaw := os.Getenv("RATE_LIMIT")
+	rateLimit, err := strconv.Atoi(rlRaw)
+	if err != nil || rateLimit <= 0 {
+		rateLimit = 4
+	}
+	logger.GetLogger().Info().
+		Int("rateLimit", rateLimit).
+		Msg("Rate limit set")
+
+	return float64(rateLimit)
 }

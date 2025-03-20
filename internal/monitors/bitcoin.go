@@ -7,11 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/rs/zerolog"
-
 	"golang.org/x/time/rate"
 	"net/http"
-	"os"
-	"strconv"
 	"time"
 )
 
@@ -23,20 +20,12 @@ type BitcoinMonitor struct {
 
 var _ interfaces.BlockchainMonitor = (*BitcoinMonitor)(nil)
 
-func NewBitcoinMonitor(log *zerolog.Logger) *BitcoinMonitor {
-	rlRaw := os.Getenv("RATE_LIMIT")
-	rateLimit, err := strconv.Atoi(rlRaw)
-	if err != nil || rateLimit <= 0 {
-		rateLimit = 4
-	}
-	log.Info().
-		Int("rateLimit", rateLimit).
-		Msg("Rate limit set")
+func NewBitcoinMonitor(endpoint string, apiKey string, rateLimit float64, log *zerolog.Logger) *BitcoinMonitor {
 
 	return &BitcoinMonitor{
 		BaseMonitor: BaseMonitor{
-			RpcEndpoint: os.Getenv("BITCOIN_RPC_ENDPOINT"),
-			ApiKey:      os.Getenv("BITCOIN_API_KEY"),
+			RpcEndpoint: endpoint,
+			ApiKey:      apiKey,
 			Addresses:   []string{"bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh"},
 			maxRetries:  1,
 			retryDelay:  2 * time.Second,
