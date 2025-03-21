@@ -5,6 +5,7 @@ import (
 	"blockchain-monitor/internal/events"
 	"blockchain-monitor/internal/interfaces"
 	"blockchain-monitor/internal/logger"
+	"blockchain-monitor/internal/monitors"
 	"blockchain-monitor/internal/monitors/bitcoin"
 	"blockchain-monitor/internal/monitors/evm"
 	"blockchain-monitor/internal/monitors/solana"
@@ -34,50 +35,59 @@ func main() {
 		BrokerAddress: os.Getenv("KAFKA_BROKER_ADDRESS"),
 		Topic:         os.Getenv("KAFKA_TOPIC"),
 	}
+	printEmitter := events.NewPrintEmitter(
+		logger.GetLogger(),
+		kafkaEmitter,
+	)
 
 	rateLimit := getRateLimit()
 
-	// Create monitors
-	bitcoinMonitor := bitcoin.NewBitcoinMonitor(
+	btcBaseMonitor := monitors.NewBaseMonitor(
+		[]string{"bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh"},
+		rateLimit,
 		os.Getenv("BITCOIN_RPC_ENDPOINT"),
 		os.Getenv("BITCOIN_API_KEY"),
-		rateLimit,
-		logger.GetLogger())
+		logger.GetLogger(),
+		printEmitter,
+	)
 
-	ethereumMonitor := evm.NewEthereumMonitor(
-		os.Getenv("ETHEREUM_RPC_ENDPOINT"),
+	// Create monitors
+	bitcoinMonitor := bitcoin.NewBitcoinMonitor(*btcBaseMonitor)
+
+	ethBaseMonitor := monitors.NewBaseMonitor(
+		[]string{"0x00000000219ab540356cBB839Cbe05303d7705Fa"},
+		rateLimit, os.Getenv("ETHEREUM_RPC_ENDPOINT"),
 		os.Getenv("ETHEREUM_API_KEY"),
-		rateLimit,
-		logger.GetLogger())
+		logger.GetLogger(),
+		printEmitter)
+	ethereumMonitor := evm.NewEthereumMonitor(*ethBaseMonitor)
 
-	solanaMonitor := solana.NewSolanaMonitor(
+	solBaseMonitor := monitors.NewBaseMonitor(
+		[]string{"5guD4Uz462GT4Y4gEuqyGsHZ59JGxFN4a3rF6KWguMcJ",
+			"oQPnhXAbLbMuKHESaGrbXT17CyvWCpLyERSJA9HCYd7"},
+		rateLimit,
 		os.Getenv("SOLANA_RPC_ENDPOINT"),
 		os.Getenv("SOLANA_API_KEY"),
-		rateLimit,
-		logger.GetLogger())
-
-	// Create a custom emitter that wraps the Kafka emitter and prints DB values
-
-	printEmitter := events.NewPrintEmitter(
-		kafkaEmitter,
-		map[string]interfaces.BlockchainMonitor{
-			ethereumMonitor.GetChainName(): ethereumMonitor,
-			bitcoinMonitor.GetChainName():  bitcoinMonitor,
-			solanaMonitor.GetChainName():   solanaMonitor,
-		},
 		logger.GetLogger(),
-	)
+		printEmitter)
+	solanaMonitor := solana.NewSolanaMonitor(*solBaseMonitor)
+
+	monitors := map[string]interfaces.BlockchainMonitor{
+		ethereumMonitor.GetChainName(): ethereumMonitor,
+		bitcoinMonitor.GetChainName():  bitcoinMonitor,
+		solanaMonitor.GetChainName():   solanaMonitor,
+	}
 
 	// WaitGroup to wait for all goroutines to finish
 	var wg sync.WaitGroup
 
 	// Start monitoring for each blockchain
-	for _, monitor := range printEmitter.Monitors {
+	for _, monitor := range monitors {
 		wg.Add(1)
 
 		go func(m interfaces.BlockchainMonitor) {
 			defer wg.Done()
-			if err := m.Start(ctx, printEmitter); err != nil {
+			if err := m.Start(ctx); err != nil {
 				logger.GetLogger().Error().Err(err).Str("chain", m.GetChainName()).Msg("Error starting monitoring")
 			}
 		}(monitor)

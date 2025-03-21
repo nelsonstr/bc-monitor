@@ -1,6 +1,7 @@
 package events
 
 import (
+	"blockchain-monitor/internal/emitters"
 	"blockchain-monitor/internal/interfaces"
 	"blockchain-monitor/internal/models"
 	"github.com/rs/zerolog"
@@ -14,13 +15,10 @@ type PrintEmitter struct {
 }
 
 // create a new PrintEmitter
-func NewPrintEmitter(wrappedEmitter interfaces.EventEmitter,
-	monitors map[string]interfaces.BlockchainMonitor,
-	logger *zerolog.Logger) *PrintEmitter {
+func NewPrintEmitter(logger *zerolog.Logger, wrappedEmitter *emitters.KafkaEmitter) *PrintEmitter {
 
 	return &PrintEmitter{
 		WrappedEmitter: wrappedEmitter,
-		Monitors:       monitors,
 		logger:         logger,
 	}
 }

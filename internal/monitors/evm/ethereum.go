@@ -7,8 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/rs/zerolog"
-	"golang.org/x/time/rate"
 	"math/big"
 	"net/http"
 	"strconv"
@@ -57,22 +55,13 @@ type EthereumTransaction struct {
 
 var _ interfaces.BlockchainMonitor = (*EthereumMonitor)(nil)
 
-func NewEthereumMonitor(endpoint string, apiKey string, rateLimit float64, log *zerolog.Logger) *EthereumMonitor {
+func NewEthereumMonitor(baseMonitor monitors.BaseMonitor) *EthereumMonitor {
 	return &EthereumMonitor{
-		BaseMonitor: monitors.BaseMonitor{
-			RpcEndpoint: endpoint,
-			ApiKey:      apiKey,
-			Addresses:   []string{"0x00000000219ab540356cBB839Cbe05303d7705Fa"},
-			MaxRetries:  1,
-			RetryDelay:  2 * time.Second,
-			RateLimiter: rate.NewLimiter(rate.Limit(rateLimit), 1),
-			Logger:      log,
-		},
+		BaseMonitor: baseMonitor,
 	}
 }
 
-func (e *EthereumMonitor) Start(ctx context.Context, emitter interfaces.EventEmitter) error {
-	e.EventEmitter = emitter
+func (e *EthereumMonitor) Start(ctx context.Context) error {
 
 	if err := e.Initialize(); err != nil {
 		e.Logger.Fatal().Err(err).Msg("Failed to initialize Ethereum monitor")

@@ -1,6 +1,7 @@
 package monitors
 
 import (
+	"blockchain-monitor/internal/events"
 	"blockchain-monitor/internal/interfaces"
 	"blockchain-monitor/internal/models"
 	"bytes"
@@ -41,11 +42,17 @@ func (t *CustomTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return t.Base.RoundTrip(req)
 }
 
-func NewBaseMonitor(addresses []string, rpcClient *http.Client, logger *zerolog.Logger) *BaseMonitor {
+func NewBaseMonitor(addresses []string, rateLimit float64, rpcEndpoint, apiKey string, logger *zerolog.Logger, emitter *events.PrintEmitter) *BaseMonitor {
+
 	return &BaseMonitor{
-		Logger:    logger,
-		Addresses: addresses,
-		Client:    rpcClient,
+		Logger:       logger,
+		Addresses:    addresses,
+		RpcEndpoint:  rpcEndpoint,
+		ApiKey:       apiKey,
+		RateLimiter:  rate.NewLimiter(rate.Limit(rateLimit), 1),
+		MaxRetries:   1,
+		RetryDelay:   time.Second,
+		EventEmitter: emitter,
 	}
 }
 

@@ -6,7 +6,7 @@ import (
 
 // BlockchainMonitor defines the interface for blockchain monitoring
 type BlockchainMonitor interface {
-	Start(ctx context.Context, emitter EventEmitter) error
+	Start(ctx context.Context) error
 	// Initialize sets up the blockchain client
 	Initialize() error
 

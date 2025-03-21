@@ -7,8 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/rs/zerolog"
-	"golang.org/x/time/rate"
 	"net/http"
 	"sync"
 	"time"
@@ -23,22 +21,22 @@ type BitcoinMonitor struct {
 
 var _ interfaces.BlockchainMonitor = (*BitcoinMonitor)(nil)
 
-func NewBitcoinMonitor(endpoint string, apiKey string, rateLimit float64, log *zerolog.Logger) *BitcoinMonitor {
+func NewBitcoinMonitor(baseMonitor monitors.BaseMonitor) *BitcoinMonitor {
 	return &BitcoinMonitor{
-		BaseMonitor: monitors.BaseMonitor{
-			RpcEndpoint: endpoint,
-			ApiKey:      apiKey,
-			Addresses:   []string{"bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh"},
-			MaxRetries:  1,
-			RetryDelay:  2 * time.Second,
-			RateLimiter: rate.NewLimiter(rate.Limit(rateLimit), 1),
-			Logger:      log,
-		},
+		BaseMonitor: baseMonitor,
+		//	monitors.BaseMonitor{
+		//	RpcEndpoint: endpoint,
+		//	ApiKey:      apiKey,
+		//	Addresses:   []string{"bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh"},
+		//	MaxRetries:  1,
+		//	RetryDelay:  2 * time.Second,
+		//	RateLimiter: rate.NewLimiter(rate.Limit(rateLimit), 1),
+		//	Logger:      log,
+		//},
 	}
 }
 
-func (b *BitcoinMonitor) Start(ctx context.Context, emitter interfaces.EventEmitter) error {
-	b.EventEmitter = emitter
+func (b *BitcoinMonitor) Start(ctx context.Context) error {
 
 	if err := b.Initialize(); err != nil {
 		b.Logger.Fatal().

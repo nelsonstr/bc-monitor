@@ -7,8 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/rs/zerolog"
-	"golang.org/x/time/rate"
 	"net/http"
 	"sync"
 	"time"
@@ -69,25 +67,13 @@ type SolanaTransactionDetails struct {
 
 var _ interfaces.BlockchainMonitor = (*SolanaMonitor)(nil)
 
-func NewSolanaMonitor(endpoint string, apiKey string, rateLimit float64, log *zerolog.Logger) *SolanaMonitor {
+func NewSolanaMonitor(baseMonitor monitors.BaseMonitor) *SolanaMonitor {
 	return &SolanaMonitor{
-		BaseMonitor: monitors.BaseMonitor{
-			RpcEndpoint: endpoint,
-			ApiKey:      apiKey,
-			Addresses: []string{
-				"5guD4Uz462GT4Y4gEuqyGsHZ59JGxFN4a3rF6KWguMcJ",
-				"oQPnhXAbLbMuKHESaGrbXT17CyvWCpLyERSJA9HCYd7",
-			},
-			MaxRetries:  1,
-			RetryDelay:  2 * time.Second,
-			RateLimiter: rate.NewLimiter(rate.Limit(rateLimit), 1),
-			Logger:      log,
-		},
+		BaseMonitor: baseMonitor,
 	}
 }
 
-func (s *SolanaMonitor) Start(ctx context.Context, emitter interfaces.EventEmitter) error {
-	s.EventEmitter = emitter
+func (s *SolanaMonitor) Start(ctx context.Context) error {
 
 	if err := s.Initialize(); err != nil {
 		s.Logger.Fatal().Err(err).Msg("Failed to initialize Solana monitor")
