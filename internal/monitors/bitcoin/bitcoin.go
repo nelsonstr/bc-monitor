@@ -292,3 +292,11 @@ func (b *BitcoinMonitor) AddAddress(address string) error {
 func (b *BitcoinMonitor) GetExplorerURL(txHash string) string {
 	return fmt.Sprintf("https://blockchair.com/bitcoin/transaction/%s", txHash)
 }
+
+func (b *BitcoinMonitor) Stop(ctx context.Context) error {
+	b.Logger.Info().Msg("Stopping Bitcoin monitor")
+
+	b.CloseHTTPClient()
+
+	return nil
+}

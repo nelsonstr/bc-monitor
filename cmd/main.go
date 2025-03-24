@@ -91,7 +91,7 @@ func main() {
 		printEmitter)
 	solanaMonitor := solana.NewSolanaMonitor(solBaseMonitor)
 
-	addressesMonitors := map[models.BlockchainName]interfaces.BlockchainMonitor{
+	bcMonitors := map[models.BlockchainName]interfaces.BlockchainMonitor{
 		ethereumMonitor.GetChainName(): ethereumMonitor,
 		bitcoinMonitor.GetChainName():  bitcoinMonitor,
 		solanaMonitor.GetChainName():   solanaMonitor,
@@ -101,7 +101,7 @@ func main() {
 	var wg sync.WaitGroup
 
 	// Start monitoring for each blockchain
-	for _, monitor := range addressesMonitors {
+	for _, monitor := range bcMonitors {
 		wg.Add(1)
 
 		go func(m interfaces.BlockchainMonitor) {
@@ -122,7 +122,7 @@ func main() {
 	_ = ethereumMonitor
 	_ = solanaMonitor
 
-	addAddressesToMonitor(addressesMonitors)
+	addAddressesToMonitor(bcMonitors)
 
 	health.SetReady(true)
 
@@ -137,6 +137,13 @@ func main() {
 
 	// Cancel the context to signal all goroutines to stop
 	cancel()
+
+	// Stop all monitors
+	for _, monitor := range bcMonitors {
+		if err := monitor.Stop(ctx); err != nil {
+			logger.GetLogger().Error().Err(err).Str("chain", monitor.GetChainName().String()).Msg("Error stopping monitor")
+		}
+	}
 
 	waitChan := make(chan struct{})
 	go func() {

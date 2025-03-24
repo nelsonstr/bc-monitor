@@ -144,3 +144,9 @@ func (b *BaseMonitor) Retry(fn func() error) error {
 	}
 	return err
 }
+
+func (b *BaseMonitor) CloseHTTPClient() {
+	if b.Client != nil {
+		b.Client.CloseIdleConnections()
+	}
+}

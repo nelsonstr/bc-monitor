@@ -20,4 +20,5 @@ type BlockchainMonitor interface {
 	GetExplorerURL(txHash string) string
 	GetBlockHead() (uint64, error)
 	AddAddress(addr string) error
+	Stop(ctx context.Context) error
 }

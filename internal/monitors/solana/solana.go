@@ -443,3 +443,12 @@ func (s *SolanaMonitor) AddAddress(address string) error {
 
 	return nil
 }
+
+func (s *SolanaMonitor) Stop(ctx context.Context) error {
+	s.Logger.Info().Msg("Stopping solana monitor")
+
+	// Close the HTTP client
+	s.CloseHTTPClient()
+
+	return nil
+}
