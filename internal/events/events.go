@@ -4,26 +4,27 @@ import (
 	"blockchain-monitor/internal/emitters"
 	"blockchain-monitor/internal/interfaces"
 	"blockchain-monitor/internal/models"
+
 	"github.com/rs/zerolog"
 )
 
-// PrintEmitter wraps another emitter and prints DB storage values
-type PrintEmitter struct {
+var _ interfaces.EventEmitter = (*GatewayEmitter)(nil)
+
+// GatewayEmitter wraps another emitter and prints DB storage values
+type GatewayEmitter struct {
 	WrappedEmitter interfaces.EventEmitter
 	logger         *zerolog.Logger
 }
 
-// create a new PrintEmitter
-func EventsGateway(logger *zerolog.Logger, wrappedEmitter *emitters.KafkaEmitter) *PrintEmitter {
-
-	return &PrintEmitter{
+func EventsGateway(logger *zerolog.Logger, wrappedEmitter *emitters.KafkaEmitter) *GatewayEmitter {
+	return &GatewayEmitter{
 		WrappedEmitter: wrappedEmitter,
 		logger:         logger,
 	}
 }
 
 // EmitEvent prints DB storage values and forwards to the wrapped emitter
-func (d *PrintEmitter) EmitEvent(event models.TransactionEvent) error {
+func (d *GatewayEmitter) EmitEvent(event models.TransactionEvent) error {
 	// Print  storage values
 	d.logger.Info().
 		Str("chain", string(event.Chain)).
@@ -39,9 +40,15 @@ func (d *PrintEmitter) EmitEvent(event models.TransactionEvent) error {
 		Str("explorer", event.ExplorerURL).
 		Msg("Transaction details -->")
 
-	// Forward to wrapped emitter
 	if d.WrappedEmitter != nil {
 		return d.WrappedEmitter.EmitEvent(event)
 	}
+
+	return nil
+}
+
+func (d *GatewayEmitter) Close() error {
+	d.WrappedEmitter.Close()
+
 	return nil
 }

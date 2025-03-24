@@ -69,7 +69,6 @@ func (b *BitcoinMonitor) Initialize() error {
 	b.blockHead = blockHead
 
 	b.Logger.Info().
-		//Str("blockHash", bestBlockHash).
 		Uint64("blockNumber", blockHead).
 		Msg("Connected to Bitcoin node")
 
@@ -126,7 +125,7 @@ func (b *BitcoinMonitor) monitorBlocks(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			b.Logger.Info().
-				Str("chain", (b.GetChainName().String())).
+				Str("chain", b.GetChainName().String()).
 				Msg("Shutting down")
 			return
 

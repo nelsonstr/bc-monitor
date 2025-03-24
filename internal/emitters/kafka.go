@@ -4,30 +4,42 @@ import (
 	"blockchain-monitor/internal/logger"
 	"blockchain-monitor/internal/models"
 	"context"
+	"encoding/json"
 	"fmt"
+	"sync"
 
 	"github.com/segmentio/kafka-go"
 )
 
 // KafkaEmitter implements EventEmitter using Kafka
 type KafkaEmitter struct {
-	BrokerAddress string
-	Topic         string
+	writer *kafka.Writer
+	mu     sync.Mutex
+}
+
+// NewKafkaEmitter creates a new KafkaEmitter
+func NewKafkaEmitter(brokerAddress, topic string) *KafkaEmitter {
+	return &KafkaEmitter{
+		writer: &kafka.Writer{
+			Addr:     kafka.TCP(brokerAddress),
+			Topic:    topic,
+			Balancer: &kafka.LeastBytes{},
+		},
+	}
 }
 
 func (k *KafkaEmitter) EmitEvent(event models.TransactionEvent) error {
-	w := &kafka.Writer{
-		Addr:     kafka.TCP(k.BrokerAddress),
-		Topic:    k.Topic,
-		Balancer: &kafka.LeastBytes{},
-	}
-	defer func(w *kafka.Writer) {
-		_ = w.Close()
-	}(w)
+	k.mu.Lock()
+	defer k.mu.Unlock()
 
-	err := w.WriteMessages(context.Background(), kafka.Message{
+	value, err := json.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("failed to marshal event: %v", err)
+	}
+
+	err = k.writer.WriteMessages(context.Background(), kafka.Message{
 		Key:   []byte(event.TxHash),
-		Value: []byte(fmt.Sprintf("%+v", event)),
+		Value: value,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to write message to Kafka: %v", err)
@@ -41,5 +53,13 @@ func (k *KafkaEmitter) EmitEvent(event models.TransactionEvent) error {
 }
 
 func (k *KafkaEmitter) Close() error {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+
+	if k.writer != nil {
+		err := k.writer.Close()
+		k.writer = nil
+		return err
+	}
 	return nil
 }

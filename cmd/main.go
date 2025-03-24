@@ -12,7 +12,6 @@ import (
 	"blockchain-monitor/internal/monitors/evm"
 	"blockchain-monitor/internal/monitors/solana"
 	"context"
-	"github.com/joho/godotenv"
 	"net/http"
 	"os"
 	"os/signal"
@@ -20,10 +19,12 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/joho/godotenv"
 )
 
 func main() {
-	logger.Init("debug") // Initialize zerolog
+	logger.Init(os.Getenv("LOG_LEVEL"))
 
 	if err := godotenv.Load(); err != nil {
 		logger.GetLogger().Fatal().Err(err).Msg("Error loading .env file")
@@ -51,11 +52,9 @@ func main() {
 	defer cancel()
 
 	// Create Kafka emitter
-	kafkaEmitter := &emitters.KafkaEmitter{
-		BrokerAddress: os.Getenv("KAFKA_BROKER_ADDRESS"),
-		Topic:         os.Getenv("KAFKA_TOPIC"),
-	}
-	printEmitter := events.EventsGateway(
+	kafkaEmitter := emitters.NewKafkaEmitter(os.Getenv("KAFKA_BROKER_ADDRESS"), os.Getenv("KAFKA_TOPIC"))
+
+	gatewayEmitter := events.EventsGateway(
 		logger.GetLogger(),
 		kafkaEmitter,
 	)
@@ -68,7 +67,7 @@ func main() {
 		os.Getenv("BITCOIN_RPC_ENDPOINT"),
 		os.Getenv("BITCOIN_API_KEY"),
 		logger.GetLogger(),
-		printEmitter,
+		gatewayEmitter,
 	)
 
 	// Create monitors
@@ -79,7 +78,7 @@ func main() {
 		rateLimit, os.Getenv("ETHEREUM_RPC_ENDPOINT"),
 		os.Getenv("ETHEREUM_API_KEY"),
 		logger.GetLogger(),
-		printEmitter)
+		gatewayEmitter)
 	ethereumMonitor := evm.NewEthereumMonitor(ethBaseMonitor)
 
 	solBaseMonitor := monitors.NewBaseMonitor(
@@ -88,13 +87,13 @@ func main() {
 		os.Getenv("SOLANA_RPC_ENDPOINT"),
 		os.Getenv("SOLANA_API_KEY"),
 		logger.GetLogger(),
-		printEmitter)
+		gatewayEmitter)
 	solanaMonitor := solana.NewSolanaMonitor(solBaseMonitor)
 
 	bcMonitors := map[models.BlockchainName]interfaces.BlockchainMonitor{
-		//ethereumMonitor.GetChainName(): ethereumMonitor,
-		//bitcoinMonitor.GetChainName():  bitcoinMonitor,
-		solanaMonitor.GetChainName(): solanaMonitor,
+		ethereumMonitor.GetChainName(): ethereumMonitor,
+		bitcoinMonitor.GetChainName():  bitcoinMonitor,
+		solanaMonitor.GetChainName():   solanaMonitor,
 	}
 
 	// WaitGroup to wait for all goroutines to finish
@@ -111,7 +110,6 @@ func main() {
 				Msg("Error starting monitoring")
 		}
 		health.RegisterMonitor(ctx, m)
-
 	}
 
 	_ = bitcoinMonitor
@@ -158,7 +156,7 @@ func main() {
 	health.SetReady(false)
 
 	// Perform any necessary cleanup
-	if err := kafkaEmitter.Close(); err != nil {
+	if err := gatewayEmitter.Close(); err != nil {
 		logger.GetLogger().Error().Err(err).Msg("Error closing Kafka emitter")
 	}
 

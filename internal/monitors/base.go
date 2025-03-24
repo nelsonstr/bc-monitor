@@ -8,12 +8,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/rs/zerolog"
-	"golang.org/x/time/rate"
 	"io"
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/rs/zerolog"
+	"golang.org/x/time/rate"
 )
 
 // BaseMonitor contains common fields and methods for all blockchain monitors
@@ -44,8 +45,7 @@ func (t *CustomTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return t.Base.RoundTrip(req)
 }
 
-func NewBaseMonitor(blockchain models.BlockchainName, rateLimit float64, rpcEndpoint, apiKey string, logger *zerolog.Logger, emitter *events.PrintEmitter) *BaseMonitor {
-
+func NewBaseMonitor(blockchain models.BlockchainName, rateLimit float64, rpcEndpoint, apiKey string, logger *zerolog.Logger, emitter *events.GatewayEmitter) *BaseMonitor {
 	return &BaseMonitor{
 		Logger:         logger,
 		Addresses:      []string{},
@@ -95,7 +95,6 @@ func (s *BaseMonitor) MakeRPCCall(method string, params []interface{}) (*models.
 
 	var response models.RPCResponse
 	err = s.Retry(func() error {
-
 		resp, err := s.Client.Do(req)
 		if err != nil {
 			return err

@@ -7,11 +7,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/gorilla/websocket"
 	"math/big"
 	"net/http"
+	"os"
 	"sync"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 var _ interfaces.BlockchainMonitor = (*SolanaMonitor)(nil)
@@ -47,14 +49,13 @@ func (s *SolanaMonitor) Start(ctx context.Context) error {
 }
 
 func (s *SolanaMonitor) Initialize() error {
-	wsURL := fmt.Sprintf("wss://solana-mainnet.core.chainstack.com/c4fd316535159fd103cc0dad2a971ab5")
+	wsURL := fmt.Sprintf(os.Getenv("SOLANA_WSS_ENDPOINT"))
 
 	dialer := websocket.Dialer{
 		HandshakeTimeout: 10 * time.Second,
 	}
 	c, _, err := dialer.Dial(wsURL, nil)
 	if err != nil {
-
 		return fmt.Errorf("failed to connect to Solana WebSocket: %v", err)
 	}
 
@@ -70,7 +71,6 @@ func (s *SolanaMonitor) Initialize() error {
 
 	blockHead, err := s.GetBlockHead()
 	if err != nil {
-
 		return fmt.Errorf("failed to connect to Solana RPC: %v", err)
 	}
 
@@ -482,7 +482,6 @@ func (s *SolanaMonitor) GetAccountBalance(address string) (uint64, error) {
 			"commitment": "confirmed",
 		},
 	})
-
 	if err != nil {
 		s.Logger.Error().Err(err).Msg("Error making RPC call")
 		return 0, err
@@ -498,5 +497,4 @@ func (s *SolanaMonitor) GetAccountBalance(address string) (uint64, error) {
 	}
 
 	return response.Value.Lamports, nil
-
 }

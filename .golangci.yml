@@ -14,7 +14,7 @@ run:
   # List of build tags, all linters use it.
   # Default: [].
   build-tags:
-    - mytag
+  - mytag
 
 
   # If set we pass it to "go list -mod={option}". From "go help modules":
@@ -70,100 +70,99 @@ linters:
   # Enable specific linter
   # https://golangci-lint.run/usage/linters/#enabled-by-default
   enable:
-    - asasalint
-    - asciicheck
-    - bidichk
-    - bodyclose
-    - containedctx
-    - contextcheck
-    - cyclop
-    - decorder
-    - dogsled
-    - dupl
-    - dupword
-    - durationcheck
-    - errcheck
-    - errchkjson
-    - errname
-    - errorlint
-    - execinquery
-    - exhaustive
-    - exportloopref
-    - forbidigo
-    - forcetypeassert
-    - funlen
-    - gci
-    - ginkgolinter
-    - gocheckcompilerdirectives
-    - gochecknoglobals
-    - gochecknoinits
-    - gocognit
-    - goconst
-    - gocritic
-    - gocyclo
-    - godot
-    - godox
-    - goerr113
-    - gofmt
-    - gofumpt
-    - goheader
-    - goimports
-    - gomnd
-    - gomoddirectives
-    - gomodguard
-    - goprintffuncname
-    - gosec
-    - gosimple
-    - gosmopolitan
-    - govet
-    - grouper
-    - importas
-    - ineffassign
-    - interfacebloat
-    - ireturn
-    - loggercheck
-    - maintidx
-    - makezero
-    - mirror
-    - misspell
-    - musttag
-    - nakedret
-    - nestif
-    - nilerr
-    - nilnil
-    - nlreturn
-    - noctx
-    - nolintlint
-    - nonamedreturns
-    - nosprintfhostport
-    - paralleltest
-    - prealloc
-    - predeclared
-    - promlinter
-    - reassign
-    - revive
-    - rowserrcheck
-    - sqlclosecheck
-    - staticcheck
-    - stylecheck
-    - tagalign
-    - tagliatelle
-    - tenv
-    - testableexamples
-    - testpackage
-    - thelper
-    - tparallel
-    - typecheck
-    - unconvert
-    - unparam
-    - unused
-    - usestdlibvars
+  - asasalint
+  - asciicheck
+  - bidichk
+  - bodyclose
+  - containedctx
+  - contextcheck
+  - cyclop
+  - decorder
+  - dogsled
+  - dupl
+  - dupword
+  - durationcheck
+  - errcheck
+  - errchkjson
+  - errname
+  - errorlint
+  - execinquery
+  - exhaustive
+#  - exportloopref
+  - forbidigo
+  - forcetypeassert
+  - funlen
+#  - gci
+#    - ginkgolinter
+  - gocheckcompilerdirectives
+  - gochecknoglobals
+  - gochecknoinits
+  - gocognit
+  - goconst
+  - gocritic
+  - gocyclo
+  - godot
+  - godox
+  - goerr113
+  - gofmt
+  - gofumpt
+  - goheader
+  - goimports
+#  - gomnd
+  - gomoddirectives
+  - gomodguard
+  - goprintffuncname
+  - gosec
+  - gosimple
+  - gosmopolitan
+  - govet
+  - grouper
+  - importas
+  - ineffassign
+  - interfacebloat
+  - ireturn
+  - loggercheck
+  - maintidx
+  - makezero
+  - mirror
+  - misspell
+  - musttag
+  - nakedret
+  - nestif
+  - nilerr
+  - nilnil
+  - nlreturn
+  - noctx
+  - nolintlint
+  - nonamedreturns
+  - nosprintfhostport
+  - paralleltest
+  - prealloc
+  - predeclared
+  - promlinter
+  - reassign
+  - revive
+  - rowserrcheck
+  - sqlclosecheck
+  - staticcheck
+  - stylecheck
+  - tagalign
+  - tagliatelle
+  - tenv
+  - testableexamples
+  - testpackage
+  - thelper
+  - tparallel
+  - unconvert
+  - unparam
+  - unused
+  - usestdlibvars
     #    - varnamelen
-    - wastedassign
-    - whitespace
-    - wrapcheck
-    - wsl
-    - zerologlint
+  - wastedassign
+  - whitespace
+  - wrapcheck
+  - wsl
+  - zerologlint
   fast: true
 issues:
   # Which dirs to skip: issues from them won't be reported.
@@ -173,8 +172,8 @@ issues:
   # but default dirs are skipped independently of this option's value (see skip-dirs-use-default).
   # "/" will be replaced by current OS file path separator to properly work on Windows.
   exclude-dirs:
-    - gen
-    - db/sqlc
+  - gen
+  - db/sqlc
 
   # Enables skipping of directories:
   # - vendor$, third_party$, testdata$, examples$, Godeps$, builtin$
@@ -187,5 +186,5 @@ issues:
   # If it's not please let us know.
   # "/" will be replaced by current OS file path separator to properly work on Windows.
   exclude-files:
-    - .*\.my\.go$
-    - lib/bad.go
+  - .*\.my\.go$
+  - lib/bad.go
