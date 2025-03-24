@@ -6,7 +6,6 @@ import (
 	"blockchain-monitor/internal/health"
 	"blockchain-monitor/internal/interfaces"
 	"blockchain-monitor/internal/logger"
-	"blockchain-monitor/internal/metrics"
 	"blockchain-monitor/internal/models"
 	"blockchain-monitor/internal/monitors"
 	"blockchain-monitor/internal/monitors/bitcoin"
@@ -29,10 +28,7 @@ func main() {
 	if err := godotenv.Load(); err != nil {
 		logger.GetLogger().Fatal().Err(err).Msg("Error loading .env file")
 	}
-
-	// Initialize metrics
-	metrics.Init()
-
+	
 	// Start HTTP server for metrics and health checks
 	go func() {
 		mux := http.NewServeMux()
