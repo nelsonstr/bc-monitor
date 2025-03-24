@@ -8,15 +8,40 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"sync"
 	"time"
 )
+
+type TransactionDetails struct {
+	Txid string  `json:"txid"`
+	Vin  []Vin   `json:"vin"`
+	Vout []Vout  `json:"vout"`
+	Fees float64 `json:"fees"`
+	Time int64   `json:"time"`
+}
+
+type Vin struct {
+	Txid string `json:"txid"`
+}
+
+type Vout struct {
+	Value        float64      `json:"value"`
+	ScriptPubKey ScriptPubKey `json:"scriptPubKey"`
+}
+
+type ScriptPubKey struct {
+	Addresses []string `json:"addresses"`
+}
+
+type BlockDetails struct {
+	Hash   string   `json:"hash"`
+	Tx     []string `json:"tx"`
+	Height uint64   `json:"height"`
+}
 
 type BitcoinMonitor struct {
 	monitors.BaseMonitor
 	latestBlockHash string
-	blockHead       int64
-	mu              sync.Mutex
+	blockHead       uint64
 }
 
 var _ interfaces.BlockchainMonitor = (*BitcoinMonitor)(nil)
@@ -24,15 +49,6 @@ var _ interfaces.BlockchainMonitor = (*BitcoinMonitor)(nil)
 func NewBitcoinMonitor(baseMonitor monitors.BaseMonitor) *BitcoinMonitor {
 	return &BitcoinMonitor{
 		BaseMonitor: baseMonitor,
-		//	monitors.BaseMonitor{
-		//	RpcEndpoint: endpoint,
-		//	ApiKey:      apiKey,
-		//	Addresses:   []string{"bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh"},
-		//	MaxRetries:  1,
-		//	RetryDelay:  2 * time.Second,
-		//	RateLimiter: rate.NewLimiter(rate.Limit(rateLimit), 1),
-		//	Logger:      log,
-		//},
 	}
 }
 
@@ -41,7 +57,7 @@ func (b *BitcoinMonitor) Start(ctx context.Context) error {
 	if err := b.Initialize(); err != nil {
 		b.Logger.Fatal().
 			Err(err).
-			Str("chain", b.GetChainName()).
+			Str("chain", b.GetChainName().String()).
 			Msg("Failed to initialize monitor")
 		return err
 	}
@@ -49,7 +65,7 @@ func (b *BitcoinMonitor) Start(ctx context.Context) error {
 	if err := b.StartMonitoring(ctx); err != nil {
 		b.Logger.Fatal().
 			Err(err).
-			Str("chain", b.GetChainName()).
+			Str("chain", b.GetChainName().String()).
 			Msg("Failed to start monitoring")
 		return err
 	}
@@ -71,7 +87,7 @@ func (b *BitcoinMonitor) Initialize() error {
 		return fmt.Errorf("failed to connect to Bitcoin node: %v", err)
 	}
 
-	blockHead, err := b.getBlockHead()
+	blockHead, err := b.GetBlockHead()
 	if err != nil {
 		return fmt.Errorf("failed to get latest block height: %v", err)
 	}
@@ -80,8 +96,8 @@ func (b *BitcoinMonitor) Initialize() error {
 	b.blockHead = blockHead
 
 	b.Logger.Info().
-		Str("blockHash", bestBlockHash).
-		Int64("blockNumber", blockHead).
+		//Str("blockHash", bestBlockHash).
+		Uint64("blockNumber", blockHead).
 		Msg("Connected to Bitcoin node")
 
 	return nil
@@ -101,14 +117,13 @@ func (b *BitcoinMonitor) getBestBlockHash() (string, error) {
 	return blockHash, nil
 }
 
-func (b *BitcoinMonitor) GetChainName() string {
-	return "Bitcoin"
-}
+//func (b *BitcoinMonitor) GetChainName() models.BlockchainName {
+//	return models.Bitcoin
+//}
 
 func (b *BitcoinMonitor) StartMonitoring(ctx context.Context) error {
 	b.Logger.Info().
-		Str("chain", b.GetChainName()).
-		Str("rpcEndpoint", b.RpcEndpoint).
+		Str("chain", b.GetChainName().String()).
 		Msg("Starting monitoring")
 
 	go b.monitorBlocks(ctx)
@@ -116,7 +131,7 @@ func (b *BitcoinMonitor) StartMonitoring(ctx context.Context) error {
 	return nil
 }
 
-func (b *BitcoinMonitor) getBlockHead() (int64, error) {
+func (b *BitcoinMonitor) GetBlockHead() (uint64, error) {
 	result, err := b.MakeRPCCall("getblockcount", nil)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get current block number: %v", err)
@@ -126,7 +141,7 @@ func (b *BitcoinMonitor) getBlockHead() (int64, error) {
 		return 0, fmt.Errorf("RPC response did not contain block count")
 	}
 
-	var height int64
+	var height uint64
 	if err := json.Unmarshal(result.Result, &height); err != nil {
 		return 0, err
 	}
@@ -142,9 +157,10 @@ func (b *BitcoinMonitor) monitorBlocks(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			b.Logger.Info().
-				Str("chain", b.GetChainName()).
+				Str("chain", (b.GetChainName().String())).
 				Msg("Shutting down")
 			return
+
 		case <-ticker.C:
 			currentBlockHash, err := b.getBestBlockHash()
 			if err != nil {
@@ -164,20 +180,21 @@ func (b *BitcoinMonitor) monitorBlocks(ctx context.Context) {
 					continue
 				}
 
-				b.mu.Lock()
+				b.Mu.Lock()
 				b.latestBlockHash = currentBlockHash
 				b.blockHead = blockHeight
-				b.mu.Unlock()
+				b.Mu.Unlock()
 
 				b.Logger.Info().
 					Str("blockHash", currentBlockHash).
+					Uint64("blockHeight", blockHeight).
 					Msg("BTC - Updated to block")
 			}
 		}
 	}
 }
 
-func (b *BitcoinMonitor) processBlock(blockHash string) (int64, error) {
+func (b *BitcoinMonitor) processBlock(blockHash string) (uint64, error) {
 	block, err := b.getBlock(blockHash)
 	if err != nil {
 		return 0, fmt.Errorf("Bitcoin - failed to get block details: %v", err)
@@ -256,6 +273,9 @@ func (b *BitcoinMonitor) getTransaction(txHash string) (*TransactionDetails, err
 }
 
 func (b *BitcoinMonitor) isWatchedAddress(address string) bool {
+	b.Mu.RLock()
+	defer b.Mu.RUnlock()
+
 	for _, watchedAddr := range b.Addresses {
 		if watchedAddr == address {
 			return true
@@ -266,13 +286,14 @@ func (b *BitcoinMonitor) isWatchedAddress(address string) bool {
 
 func (b *BitcoinMonitor) emitTransactionEvent(tx *TransactionDetails, address string, amount float64) {
 	event := models.TransactionEvent{
-		Chain:     b.GetChainName(),
-		From:      tx.Vin[0].Txid, // Simplified; you might need to get the actual source address
-		To:        address,
-		Amount:    fmt.Sprintf("%f", amount),
-		Fees:      fmt.Sprintf("%f", tx.Fees),
-		TxHash:    tx.Txid,
-		Timestamp: time.Unix(tx.Time, 0),
+		Chain:       b.GetChainName(),
+		From:        tx.Vin[0].Txid, // Simplified; you might need to get the actual source address
+		To:          address,
+		Amount:      fmt.Sprintf("%f", amount),
+		Fees:        fmt.Sprintf("%f", tx.Fees),
+		TxHash:      tx.Txid,
+		Timestamp:   time.Unix(tx.Time, 0),
+		ExplorerURL: b.GetExplorerURL(tx.Txid),
 	}
 
 	if err := b.EventEmitter.EmitEvent(event); err != nil {
@@ -283,31 +304,20 @@ func (b *BitcoinMonitor) emitTransactionEvent(tx *TransactionDetails, address st
 	}
 }
 
-type BlockDetails struct {
-	Hash   string   `json:"hash"`
-	Tx     []string `json:"tx"`
-	Height int64    `json:"height"`
-}
+func (b *BitcoinMonitor) AddAddress(address string) error {
+	b.Mu.Lock()
+	defer b.Mu.Unlock()
 
-type TransactionDetails struct {
-	Txid string  `json:"txid"`
-	Vin  []Vin   `json:"vin"`
-	Vout []Vout  `json:"vout"`
-	Fees float64 `json:"fees"`
-	Time int64   `json:"time"`
-}
+	// Check if the address is already being monitored
+	for _, watchedAddr := range b.Addresses {
+		if watchedAddr == address {
+			return nil // Address is already being monitored
+		}
+	}
 
-type Vin struct {
-	Txid string `json:"txid"`
-}
+	b.Addresses = append(b.Addresses, address)
 
-type Vout struct {
-	Value        float64      `json:"value"`
-	ScriptPubKey ScriptPubKey `json:"scriptPubKey"`
-}
-
-type ScriptPubKey struct {
-	Addresses []string `json:"addresses"`
+	return nil
 }
 
 func (b *BitcoinMonitor) GetExplorerURL(txHash string) string {

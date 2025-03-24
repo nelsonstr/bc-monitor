@@ -10,12 +10,11 @@ import (
 // PrintEmitter wraps another emitter and prints DB storage values
 type PrintEmitter struct {
 	WrappedEmitter interfaces.EventEmitter
-	Monitors       map[string]interfaces.BlockchainMonitor
 	logger         *zerolog.Logger
 }
 
 // create a new PrintEmitter
-func NewPrintEmitter(logger *zerolog.Logger, wrappedEmitter *emitters.KafkaEmitter) *PrintEmitter {
+func EventsGateway(logger *zerolog.Logger, wrappedEmitter *emitters.KafkaEmitter) *PrintEmitter {
 
 	return &PrintEmitter{
 		WrappedEmitter: wrappedEmitter,
@@ -27,24 +26,18 @@ func NewPrintEmitter(logger *zerolog.Logger, wrappedEmitter *emitters.KafkaEmitt
 func (d *PrintEmitter) EmitEvent(event models.TransactionEvent) error {
 	// Print  storage values
 	d.logger.Info().
-		Str("chain", event.Chain).
+		Str("chain", string(event.Chain)).
 		Msg("STORAGE VALUES")
 
 	d.logger.Info().
-		Str("chain", event.Chain).
+		Str("chain", string(event.Chain)).
 		Str("source", event.From).
 		Str("destination", event.To).
 		Str("amount", event.Amount).
 		Str("fees", event.Fees).
 		Time("timestamp", event.Timestamp).
+		Str("explorer", event.ExplorerURL).
 		Msg("Transaction details -->")
-
-	// Print chain-specific information
-	if monitor, ok := d.Monitors[event.Chain]; ok {
-		d.logger.Info().
-			Str("explorer", monitor.GetExplorerURL(event.TxHash)).
-			Msg("Chain-specific information")
-	}
 
 	// Forward to wrapped emitter
 	if d.WrappedEmitter != nil {

@@ -1,6 +1,7 @@
 package interfaces
 
 import (
+	"blockchain-monitor/internal/models"
 	"context"
 )
 
@@ -14,7 +15,9 @@ type BlockchainMonitor interface {
 	StartMonitoring(ctx context.Context) error
 
 	// GetChainName returns the name of the blockchain
-	GetChainName() string
+	GetChainName() models.BlockchainName
 
 	GetExplorerURL(txHash string) string
+	GetBlockHead() (uint64, error)
+	AddAddress(addr string) error
 }

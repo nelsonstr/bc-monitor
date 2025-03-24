@@ -12,26 +12,7 @@ import (
 	"time"
 )
 
-// SolanaMonitor implements BlockchainMonitor for Solana
-type SolanaMonitor struct {
-	monitors.BaseMonitor
-	latestSlot uint64
-	mu         sync.Mutex
-}
-
-type SolanaRpcRequest struct {
-	Jsonrpc string        `json:"jsonrpc"`
-	ID      int           `json:"id"`
-	Method  string        `json:"method"`
-	Params  []interface{} `json:"params"`
-}
-
-type SolanaSlotResponse struct {
-	Context struct {
-		Slot uint64 `json:"slot"`
-	} `json:"context"`
-	Value uint64 `json:"value"`
-}
+var _ interfaces.BlockchainMonitor = (*SolanaMonitor)(nil)
 
 type SolanaTransaction struct {
 	BlockTime   int64  `json:"blockTime"`
@@ -65,7 +46,10 @@ type SolanaTransactionDetails struct {
 	Timestamp time.Time
 }
 
-var _ interfaces.BlockchainMonitor = (*SolanaMonitor)(nil)
+type SolanaMonitor struct {
+	monitors.BaseMonitor
+	latestSlot uint64
+}
 
 func NewSolanaMonitor(baseMonitor monitors.BaseMonitor) *SolanaMonitor {
 	return &SolanaMonitor{
@@ -103,14 +87,12 @@ func (s *SolanaMonitor) Initialize() error {
 	}
 
 	s.latestSlot = slot
-	s.Logger.Info().
-		Int("addressCount", len(s.Addresses)).
-		Msg("Starting Solana monitoring")
-	return nil
-}
 
-func (s *SolanaMonitor) GetChainName() string {
-	return "Solana"
+	s.Logger.Info().
+		Uint64("lastestSlot", slot).
+		Msg("Starting Solana monitoring")
+
+	return nil
 }
 
 func (s *SolanaMonitor) StartMonitoring(ctx context.Context) error {
@@ -186,17 +168,18 @@ func (s *SolanaMonitor) pollAccountChanges(ctx context.Context, address string) 
 					}
 
 					event := models.TransactionEvent{
-						From:      txDetails.From,
-						To:        txDetails.To,
-						Amount:    fmt.Sprintf("%.9f", solAmount),
-						Fees:      fmt.Sprintf("%.9f", txDetails.Fees),
-						Chain:     s.GetChainName(),
-						TxHash:    txDetails.TxHash,
-						Timestamp: txDetails.Timestamp,
+						From:        txDetails.From,
+						To:          txDetails.To,
+						Amount:      fmt.Sprintf("%.9f", solAmount),
+						Fees:        fmt.Sprintf("%.9f", txDetails.Fees),
+						Chain:       s.GetChainName(),
+						TxHash:      txDetails.TxHash,
+						Timestamp:   txDetails.Timestamp,
+						ExplorerURL: s.GetExplorerURL(txDetails.TxHash),
 					}
 
 					s.Logger.Info().
-						Str("chain", event.Chain).
+						Str("chain", string(event.Chain)).
 						Str("from", event.From).
 						Str("to", event.To).
 						Str("amount", event.Amount).
@@ -314,13 +297,14 @@ func (s *SolanaMonitor) processTransaction(tx SolanaTransaction, watchAddresses 
 			}
 
 			event := models.TransactionEvent{
-				From:      source,
-				To:        destination,
-				Amount:    amount,
-				Fees:      convertLaports2Sol(tx.Meta.Fee),
-				Chain:     s.GetChainName(),
-				TxHash:    tx.Transaction.Signatures[0],
-				Timestamp: time.Unix(tx.BlockTime, 0),
+				From:        source,
+				To:          destination,
+				Amount:      amount,
+				Fees:        convertLaports2Sol(tx.Meta.Fee),
+				Chain:       s.GetChainName(),
+				TxHash:      tx.Transaction.Signatures[0],
+				Timestamp:   time.Unix(tx.BlockTime, 0),
+				ExplorerURL: s.GetExplorerURL(tx.Transaction.Signatures[0]),
 			}
 
 			s.EventEmitter.EmitEvent(event)
@@ -447,4 +431,42 @@ func (s *SolanaMonitor) getRecentTransactionDetails(address string) (SolanaTrans
 		TxHash:    signaturesResp[0].Signature,
 		Timestamp: time.Unix(signaturesResp[0].BlockTime, 0),
 	}, nil
+}
+
+func (s *SolanaMonitor) GetBlockHead() (uint64, error) {
+	resp, err := s.MakeRPCCall("getSlot", nil)
+	if err != nil {
+		return 0, err
+	}
+
+	var block uint64
+	if err := json.Unmarshal(resp.Result, &block); err != nil {
+		return 0, err
+	}
+
+	return block, nil
+}
+
+func (s *SolanaMonitor) AddAddress(address string) error {
+	s.Mu.Lock()
+	defer s.Mu.Unlock()
+
+	// Check if the address is already being monitored
+	for _, addr := range s.Addresses {
+		if addr == address {
+			return nil // Address is already being monitored
+		}
+	}
+
+	// Add the new address
+	s.Addresses = append(s.Addresses, address)
+
+	// Start monitoring the new address
+	go s.pollAccountChanges(context.Background(), address)
+
+	s.Logger.Info().
+		Str("address", address).
+		Msg("Added new Solana address to monitoring")
+
+	return nil
 }

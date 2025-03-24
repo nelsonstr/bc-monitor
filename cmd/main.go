@@ -3,14 +3,18 @@ package main
 import (
 	"blockchain-monitor/internal/emitters"
 	"blockchain-monitor/internal/events"
+	"blockchain-monitor/internal/health"
 	"blockchain-monitor/internal/interfaces"
 	"blockchain-monitor/internal/logger"
+	"blockchain-monitor/internal/metrics"
+	"blockchain-monitor/internal/models"
 	"blockchain-monitor/internal/monitors"
 	"blockchain-monitor/internal/monitors/bitcoin"
 	"blockchain-monitor/internal/monitors/evm"
 	"blockchain-monitor/internal/monitors/solana"
 	"context"
 	"github.com/joho/godotenv"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -26,6 +30,26 @@ func main() {
 		logger.GetLogger().Fatal().Err(err).Msg("Error loading .env file")
 	}
 
+	// Initialize metrics
+	metrics.Init()
+
+	// Start HTTP server for metrics and health checks
+	go func() {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/healthz", health.LivenessHandler)
+		mux.HandleFunc("/readyz", health.ReadinessHandler)
+
+		server := &http.Server{
+			Addr:    ":8888",
+			Handler: mux,
+		}
+
+		logger.GetLogger().Info().Msg("Starting HTTP server on :8888")
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.GetLogger().Error().Err(err).Msg("Error starting HTTP server")
+		}
+	}()
+
 	// Create a context that we can cancel
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -35,7 +59,7 @@ func main() {
 		BrokerAddress: os.Getenv("KAFKA_BROKER_ADDRESS"),
 		Topic:         os.Getenv("KAFKA_TOPIC"),
 	}
-	printEmitter := events.NewPrintEmitter(
+	printEmitter := events.EventsGateway(
 		logger.GetLogger(),
 		kafkaEmitter,
 	)
@@ -43,7 +67,7 @@ func main() {
 	rateLimit := getRateLimit()
 
 	btcBaseMonitor := monitors.NewBaseMonitor(
-		[]string{"bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh"},
+		models.Bitcoin,
 		rateLimit,
 		os.Getenv("BITCOIN_RPC_ENDPOINT"),
 		os.Getenv("BITCOIN_API_KEY"),
@@ -55,7 +79,7 @@ func main() {
 	bitcoinMonitor := bitcoin.NewBitcoinMonitor(*btcBaseMonitor)
 
 	ethBaseMonitor := monitors.NewBaseMonitor(
-		[]string{"0x00000000219ab540356cBB839Cbe05303d7705Fa"},
+		models.Ethereum,
 		rateLimit, os.Getenv("ETHEREUM_RPC_ENDPOINT"),
 		os.Getenv("ETHEREUM_API_KEY"),
 		logger.GetLogger(),
@@ -63,8 +87,7 @@ func main() {
 	ethereumMonitor := evm.NewEthereumMonitor(*ethBaseMonitor)
 
 	solBaseMonitor := monitors.NewBaseMonitor(
-		[]string{"5guD4Uz462GT4Y4gEuqyGsHZ59JGxFN4a3rF6KWguMcJ",
-			"oQPnhXAbLbMuKHESaGrbXT17CyvWCpLyERSJA9HCYd7"},
+		models.Solana,
 		rateLimit,
 		os.Getenv("SOLANA_RPC_ENDPOINT"),
 		os.Getenv("SOLANA_API_KEY"),
@@ -72,7 +95,7 @@ func main() {
 		printEmitter)
 	solanaMonitor := solana.NewSolanaMonitor(*solBaseMonitor)
 
-	monitors := map[string]interfaces.BlockchainMonitor{
+	monitors := map[models.BlockchainName]interfaces.BlockchainMonitor{
 		ethereumMonitor.GetChainName(): ethereumMonitor,
 		bitcoinMonitor.GetChainName():  bitcoinMonitor,
 		solanaMonitor.GetChainName():   solanaMonitor,
@@ -88,14 +111,22 @@ func main() {
 		go func(m interfaces.BlockchainMonitor) {
 			defer wg.Done()
 			if err := m.Start(ctx); err != nil {
-				logger.GetLogger().Error().Err(err).Str("chain", m.GetChainName()).Msg("Error starting monitoring")
+				logger.GetLogger().
+					Error().
+					Err(err).
+					Str("chain", m.GetChainName().String()).
+					Msg("Error starting monitoring")
 			}
+			health.RegisterMonitor(ctx, monitor)
 		}(monitor)
+
 	}
 
 	_ = bitcoinMonitor
 	_ = ethereumMonitor
 	_ = solanaMonitor
+
+	addAddressesToMonitor(monitors)
 
 	// Set up signal handling
 	sigChan := make(chan os.Signal, 1)
@@ -103,12 +134,14 @@ func main() {
 
 	// Wait for interrupt signal
 	<-sigChan
-	logger.GetLogger().Info().Msg("Received shutdown signal. Initiating graceful shutdown...")
+	logger.GetLogger().Info().
+		Msg("Received shutdown signal. Initiating graceful shutdown...")
 
 	// Cancel the context to signal all goroutines to stop
 	cancel()
 
-	// Wait for all goroutines to finish with a timeout
+	health.SetReady(true)
+
 	waitChan := make(chan struct{})
 	go func() {
 		wg.Wait()
@@ -118,9 +151,12 @@ func main() {
 	select {
 	case <-waitChan:
 		logger.GetLogger().Info().Msg("All monitors have shut down gracefully")
-	case <-time.After(30 * time.Second):
+	case <-time.After(10 * time.Second):
 		logger.GetLogger().Warn().Msg("Shutdown timed out after 30 seconds")
 	}
+
+	// Before shutting down, set the application as not ready
+	health.SetReady(false)
 
 	// Perform any necessary cleanup
 	if err := kafkaEmitter.Close(); err != nil {

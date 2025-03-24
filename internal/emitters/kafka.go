@@ -32,7 +32,7 @@ func (k *KafkaEmitter) EmitEvent(event models.TransactionEvent) error {
 	}
 
 	logger.GetLogger().Info().
-		Str("chain", event.Chain).
+		Str("chain", event.Chain.String()).
 		Str("txHash", event.TxHash).
 		Msg("Successfully emitted event to Kafka")
 	return nil

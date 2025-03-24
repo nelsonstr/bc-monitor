@@ -5,19 +5,19 @@ import (
 )
 
 type User struct {
-	id              string
-	EthereumAddress []string
-	SolanaAddress   []string
-	Bitcoin         []string
+	Id string
+
+	Addresess map[BlockchainName][]string
 }
 
 // TransactionEvent represents a blockchain transaction event
 type TransactionEvent struct {
-	From      string
-	To        string
-	Amount    string
-	Fees      string
-	Chain     string
-	TxHash    string
-	Timestamp time.Time
+	From        string
+	To          string
+	Amount      string
+	Fees        string
+	Chain       BlockchainName
+	TxHash      string
+	Timestamp   time.Time
+	ExplorerURL string
 }

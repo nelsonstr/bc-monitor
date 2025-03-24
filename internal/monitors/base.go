@@ -11,22 +11,23 @@ import (
 	"github.com/rs/zerolog"
 	"golang.org/x/time/rate"
 	"net/http"
+	"sync"
 	"time"
 )
 
 // BaseMonitor contains common fields and methods for all blockchain monitors
 type BaseMonitor struct {
-	ApiKey       string
-	RpcEndpoint  string
-	EventEmitter interfaces.EventEmitter
-	Addresses    []string
-	MaxRetries   int
-	RetryDelay   time.Duration
-	RateLimiter  *rate.Limiter
-
-	Logger *zerolog.Logger
-
-	Client *http.Client
+	ApiKey         string
+	RpcEndpoint    string
+	EventEmitter   interfaces.EventEmitter
+	Addresses      []string
+	MaxRetries     int
+	RetryDelay     time.Duration
+	RateLimiter    *rate.Limiter
+	Mu             sync.RWMutex
+	Client         *http.Client
+	Logger         *zerolog.Logger
+	BlockchainName models.BlockchainName
 }
 
 type CustomTransport struct {
@@ -42,21 +43,31 @@ func (t *CustomTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return t.Base.RoundTrip(req)
 }
 
-func NewBaseMonitor(addresses []string, rateLimit float64, rpcEndpoint, apiKey string, logger *zerolog.Logger, emitter *events.PrintEmitter) *BaseMonitor {
+func NewBaseMonitor(blockchain models.BlockchainName, rateLimit float64, rpcEndpoint, apiKey string, logger *zerolog.Logger, emitter *events.PrintEmitter) *BaseMonitor {
 
 	return &BaseMonitor{
-		Logger:       logger,
-		Addresses:    addresses,
-		RpcEndpoint:  rpcEndpoint,
-		ApiKey:       apiKey,
-		RateLimiter:  rate.NewLimiter(rate.Limit(rateLimit), 1),
-		MaxRetries:   1,
-		RetryDelay:   time.Second,
-		EventEmitter: emitter,
+		Logger:         logger,
+		Addresses:      []string{},
+		RpcEndpoint:    rpcEndpoint,
+		ApiKey:         apiKey,
+		RateLimiter:    rate.NewLimiter(rate.Limit(rateLimit), 1),
+		MaxRetries:     1,
+		RetryDelay:     time.Second,
+		EventEmitter:   emitter,
+		BlockchainName: blockchain,
 	}
 }
 
+func (b *BaseMonitor) GetChainName() models.BlockchainName {
+	return b.BlockchainName
+}
+
 func (s *BaseMonitor) MakeRPCCall(method string, params []interface{}) (*models.RPCResponse, error) {
+	s.Logger.Debug().
+		Str("url", s.RpcEndpoint).
+		Str("method", method).
+		Interface("params", params).
+		Msg("Making RPC call")
 	// Wait for rate limit
 	if err := s.RateLimiter.Wait(context.Background()); err != nil {
 		s.Logger.Error().Err(err).Msg("Rate limit error")
@@ -110,6 +121,7 @@ func (s *BaseMonitor) MakeRPCCall(method string, params []interface{}) (*models.
 	if err != nil {
 		s.Logger.Error().
 			Err(err).
+			Str("blockchain", s.BlockchainName.String()).
 			Str("method", method).
 			Interface("params", params).
 			Msg("RPC call failed")
