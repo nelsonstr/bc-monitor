@@ -444,7 +444,7 @@ func (s *SolanaMonitor) AddAddress(address string) error {
 	return nil
 }
 
-func (s *SolanaMonitor) Stop(ctx context.Context) error {
+func (s *SolanaMonitor) Stop(_ context.Context) error {
 	s.Logger.Info().Msg("Stopping solana monitor")
 
 	// Close the HTTP client

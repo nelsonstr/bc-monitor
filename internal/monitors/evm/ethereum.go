@@ -331,7 +331,7 @@ func formatBigFloat(f *big.Float) string {
 	return strings.TrimRight(strings.TrimRight(str, "0"), ".")
 }
 
-func (e *EthereumMonitor) Stop(ctx context.Context) error {
+func (e *EthereumMonitor) Stop(_ context.Context) error {
 	e.Logger.Info().Msg("Stopping Ethereum monitor")
 
 	e.CloseHTTPClient()

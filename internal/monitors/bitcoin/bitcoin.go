@@ -293,7 +293,7 @@ func (b *BitcoinMonitor) GetExplorerURL(txHash string) string {
 	return fmt.Sprintf("https://blockchair.com/bitcoin/transaction/%s", txHash)
 }
 
-func (b *BitcoinMonitor) Stop(ctx context.Context) error {
+func (b *BitcoinMonitor) Stop(_ context.Context) error {
 	b.Logger.Info().Msg("Stopping Bitcoin monitor")
 
 	b.CloseHTTPClient()
