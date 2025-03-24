@@ -46,9 +46,9 @@ type BitcoinMonitor struct {
 
 var _ interfaces.BlockchainMonitor = (*BitcoinMonitor)(nil)
 
-func NewBitcoinMonitor(baseMonitor monitors.BaseMonitor) *BitcoinMonitor {
+func NewBitcoinMonitor(baseMonitor *monitors.BaseMonitor) *BitcoinMonitor {
 	return &BitcoinMonitor{
-		BaseMonitor: baseMonitor,
+		BaseMonitor: *baseMonitor,
 	}
 }
 

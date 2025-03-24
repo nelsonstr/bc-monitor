@@ -21,7 +21,9 @@ func (k *KafkaEmitter) EmitEvent(event models.TransactionEvent) error {
 		Topic:    k.Topic,
 		Balancer: &kafka.LeastBytes{},
 	}
-	defer w.Close()
+	defer func(w *kafka.Writer) {
+		_ = w.Close()
+	}(w)
 
 	err := w.WriteMessages(context.Background(), kafka.Message{
 		Key:   []byte(event.TxHash),

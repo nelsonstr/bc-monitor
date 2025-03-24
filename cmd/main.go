@@ -76,7 +76,7 @@ func main() {
 	)
 
 	// Create monitors
-	bitcoinMonitor := bitcoin.NewBitcoinMonitor(*btcBaseMonitor)
+	bitcoinMonitor := bitcoin.NewBitcoinMonitor(btcBaseMonitor)
 
 	ethBaseMonitor := monitors.NewBaseMonitor(
 		models.Ethereum,
@@ -84,7 +84,7 @@ func main() {
 		os.Getenv("ETHEREUM_API_KEY"),
 		logger.GetLogger(),
 		printEmitter)
-	ethereumMonitor := evm.NewEthereumMonitor(*ethBaseMonitor)
+	ethereumMonitor := evm.NewEthereumMonitor(ethBaseMonitor)
 
 	solBaseMonitor := monitors.NewBaseMonitor(
 		models.Solana,
@@ -93,9 +93,9 @@ func main() {
 		os.Getenv("SOLANA_API_KEY"),
 		logger.GetLogger(),
 		printEmitter)
-	solanaMonitor := solana.NewSolanaMonitor(*solBaseMonitor)
+	solanaMonitor := solana.NewSolanaMonitor(solBaseMonitor)
 
-	monitors := map[models.BlockchainName]interfaces.BlockchainMonitor{
+	addressesMonitors := map[models.BlockchainName]interfaces.BlockchainMonitor{
 		ethereumMonitor.GetChainName(): ethereumMonitor,
 		bitcoinMonitor.GetChainName():  bitcoinMonitor,
 		solanaMonitor.GetChainName():   solanaMonitor,
@@ -105,7 +105,7 @@ func main() {
 	var wg sync.WaitGroup
 
 	// Start monitoring for each blockchain
-	for _, monitor := range monitors {
+	for _, monitor := range addressesMonitors {
 		wg.Add(1)
 
 		go func(m interfaces.BlockchainMonitor) {
@@ -126,7 +126,7 @@ func main() {
 	_ = ethereumMonitor
 	_ = solanaMonitor
 
-	addAddressesToMonitor(monitors)
+	addAddressesToMonitor(addressesMonitors)
 
 	// Set up signal handling
 	sigChan := make(chan os.Signal, 1)

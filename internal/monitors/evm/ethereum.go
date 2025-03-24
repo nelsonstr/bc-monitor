@@ -69,9 +69,9 @@ type EthereumTransaction struct {
 
 var _ interfaces.BlockchainMonitor = (*EthereumMonitor)(nil)
 
-func NewEthereumMonitor(baseMonitor monitors.BaseMonitor) *EthereumMonitor {
+func NewEthereumMonitor(baseMonitor *monitors.BaseMonitor) *EthereumMonitor {
 	return &EthereumMonitor{
-		BaseMonitor: baseMonitor,
+		BaseMonitor: *baseMonitor,
 	}
 }
 
@@ -264,7 +264,6 @@ func (e *EthereumMonitor) processSingleTransaction(tx EthereumTransaction, watch
 	if watchAddresses[from] || watchAddresses[to] {
 		event := e.processTransaction(tx, from, to, blockTime, baseFeePerGas)
 		if e.EventEmitter != nil {
-			e.EventEmitter.EmitEvent(event)
 			e.Logger.Info().
 				Str("from", from).
 				Str("to", to).
@@ -273,6 +272,13 @@ func (e *EthereumMonitor) processSingleTransaction(tx EthereumTransaction, watch
 				Str("txHash", tx.Hash).
 				Str("ExplorerURL", e.GetExplorerURL(tx.Hash)).
 				Msg("Emitted transaction event")
+			if err := e.EventEmitter.EmitEvent(event); err != nil {
+				e.Logger.Error().
+					Err(err).
+					Msg("Error emitting transaction event")
+				return nil
+			}
+
 		} else {
 			e.Logger.Warn().Msg("EventEmitter is nil, cannot emit event")
 		}

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"github.com/rs/zerolog"
 	"golang.org/x/time/rate"
+	"io"
 	"net/http"
 	"sync"
 	"time"
@@ -103,7 +104,9 @@ func (s *BaseMonitor) MakeRPCCall(method string, params []interface{}) (*models.
 		if err != nil {
 			return err
 		}
-		defer resp.Body.Close()
+		defer func(Body io.ReadCloser) {
+			_ = Body.Close()
+		}(resp.Body)
 
 		if resp.StatusCode != http.StatusOK {
 			return fmt.Errorf("HTTP error: %d - %s", resp.StatusCode, resp.Status)

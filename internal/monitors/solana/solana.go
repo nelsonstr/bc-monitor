@@ -51,9 +51,9 @@ type SolanaMonitor struct {
 	latestSlot uint64
 }
 
-func NewSolanaMonitor(baseMonitor monitors.BaseMonitor) *SolanaMonitor {
+func NewSolanaMonitor(baseMonitor *monitors.BaseMonitor) *SolanaMonitor {
 	return &SolanaMonitor{
-		BaseMonitor: baseMonitor,
+		BaseMonitor: *baseMonitor,
 	}
 }
 
@@ -188,7 +188,10 @@ func (s *SolanaMonitor) pollAccountChanges(ctx context.Context, address string) 
 						Time("timestamp", event.Timestamp).
 						Msg("STORAGE VALUES")
 
-					s.EventEmitter.EmitEvent(event)
+					if err := s.EventEmitter.EmitEvent(event); err != nil {
+						s.Logger.Error().Err(err).Msg("Error emitting event")
+						return
+					}
 				} else {
 					s.Logger.Info().
 						Str("address", address).
@@ -307,7 +310,9 @@ func (s *SolanaMonitor) processTransaction(tx SolanaTransaction, watchAddresses 
 				ExplorerURL: s.GetExplorerURL(tx.Transaction.Signatures[0]),
 			}
 
-			s.EventEmitter.EmitEvent(event)
+			if err := s.EventEmitter.EmitEvent(event); err != nil {
+				s.Logger.Error().Err(err).Msg("Error emitting event")
+			}
 			break
 		}
 	}
