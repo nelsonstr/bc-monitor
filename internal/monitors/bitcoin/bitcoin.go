@@ -39,7 +39,7 @@ type BlockDetails struct {
 }
 
 type BitcoinMonitor struct {
-	monitors.BaseMonitor
+	*monitors.BaseMonitor
 	latestBlockHash string
 	blockHead       uint64
 }
@@ -48,7 +48,7 @@ var _ interfaces.BlockchainMonitor = (*BitcoinMonitor)(nil)
 
 func NewBitcoinMonitor(baseMonitor *monitors.BaseMonitor) *BitcoinMonitor {
 	return &BitcoinMonitor{
-		BaseMonitor: *baseMonitor,
+		BaseMonitor: baseMonitor,
 	}
 }
 

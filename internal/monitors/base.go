@@ -25,7 +25,7 @@ type BaseMonitor struct {
 	MaxRetries     int
 	RetryDelay     time.Duration
 	RateLimiter    *rate.Limiter
-	Mu             sync.RWMutex
+	Mu             *sync.RWMutex
 	Client         *http.Client
 	Logger         *zerolog.Logger
 	BlockchainName models.BlockchainName

@@ -30,18 +30,19 @@ func SetReady(ready bool) {
 	}
 }
 
-func LivenessHandler(w http.ResponseWriter, r *http.Request) {
+func LivenessHandler(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("OK"))
 }
 
-func ReadinessHandler(w http.ResponseWriter, r *http.Request) {
+func ReadinessHandler(w http.ResponseWriter, _ *http.Request) {
 	statusMutex.RLock()
 	defer statusMutex.RUnlock()
 
 	if len(blockchainStatuses) == 0 || atomic.LoadInt32(&isReady) == 0 {
 		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte("Not Ready"))
+		_, _ = w.Write([]byte("Not Ready"))
+
 		return
 	}
 
@@ -51,7 +52,7 @@ func ReadinessHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(response)
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 func RegisterMonitor(ctx context.Context, monitor interfaces.BlockchainMonitor) {

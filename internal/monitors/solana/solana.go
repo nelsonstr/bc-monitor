@@ -47,13 +47,13 @@ type SolanaTransactionDetails struct {
 }
 
 type SolanaMonitor struct {
-	monitors.BaseMonitor
+	*monitors.BaseMonitor
 	latestSlot uint64
 }
 
 func NewSolanaMonitor(baseMonitor *monitors.BaseMonitor) *SolanaMonitor {
 	return &SolanaMonitor{
-		BaseMonitor: *baseMonitor,
+		BaseMonitor: baseMonitor,
 	}
 }
 

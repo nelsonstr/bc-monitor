@@ -16,7 +16,7 @@ import (
 )
 
 type EthereumMonitor struct {
-	monitors.BaseMonitor
+	*monitors.BaseMonitor
 	latestBlock uint64
 	mu          sync.Mutex
 }
@@ -71,7 +71,7 @@ var _ interfaces.BlockchainMonitor = (*EthereumMonitor)(nil)
 
 func NewEthereumMonitor(baseMonitor *monitors.BaseMonitor) *EthereumMonitor {
 	return &EthereumMonitor{
-		BaseMonitor: *baseMonitor,
+		BaseMonitor: baseMonitor,
 	}
 }
 
