@@ -28,7 +28,7 @@ func main() {
 	if err := godotenv.Load(); err != nil {
 		logger.GetLogger().Fatal().Err(err).Msg("Error loading .env file")
 	}
-	
+
 	// Start HTTP server for metrics and health checks
 	go func() {
 		mux := http.NewServeMux()
@@ -124,6 +124,8 @@ func main() {
 
 	addAddressesToMonitor(addressesMonitors)
 
+	health.SetReady(true)
+
 	// Set up signal handling
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -135,8 +137,6 @@ func main() {
 
 	// Cancel the context to signal all goroutines to stop
 	cancel()
-
-	health.SetReady(true)
 
 	waitChan := make(chan struct{})
 	go func() {
