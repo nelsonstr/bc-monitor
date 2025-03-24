@@ -32,7 +32,7 @@ func SetReady(ready bool) {
 
 func LivenessHandler(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("OK"))
+	_, _ = w.Write([]byte("OK"))
 }
 
 func ReadinessHandler(w http.ResponseWriter, _ *http.Request) {
@@ -71,7 +71,7 @@ func RegisterMonitor(ctx context.Context, monitor interfaces.BlockchainMonitor) 
 				} else {
 					updateBlockchainStatus(monitor.GetChainName().String(), lastBlock)
 				}
-				time.Sleep(10 * time.Second) // Update every 10 seconds
+				time.Sleep(10 * time.Second)
 			}
 		}
 	}()
