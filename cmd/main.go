@@ -23,7 +23,7 @@ import (
 )
 
 func main() {
-	logger.Init("info") // Initialize zerolog
+	logger.Init("debug") // Initialize zerolog
 
 	if err := godotenv.Load(); err != nil {
 		logger.GetLogger().Fatal().Err(err).Msg("Error loading .env file")
@@ -92,29 +92,25 @@ func main() {
 	solanaMonitor := solana.NewSolanaMonitor(solBaseMonitor)
 
 	bcMonitors := map[models.BlockchainName]interfaces.BlockchainMonitor{
-		ethereumMonitor.GetChainName(): ethereumMonitor,
-		bitcoinMonitor.GetChainName():  bitcoinMonitor,
-		solanaMonitor.GetChainName():   solanaMonitor,
+		//ethereumMonitor.GetChainName(): ethereumMonitor,
+		//bitcoinMonitor.GetChainName():  bitcoinMonitor,
+		solanaMonitor.GetChainName(): solanaMonitor,
 	}
 
 	// WaitGroup to wait for all goroutines to finish
 	var wg sync.WaitGroup
 
 	// Start monitoring for each blockchain
-	for _, monitor := range bcMonitors {
-		wg.Add(1)
+	for _, m := range bcMonitors {
 
-		go func(m interfaces.BlockchainMonitor) {
-			defer wg.Done()
-			if err := m.Start(ctx); err != nil {
-				logger.GetLogger().
-					Error().
-					Err(err).
-					Str("chain", m.GetChainName().String()).
-					Msg("Error starting monitoring")
-			}
-			health.RegisterMonitor(ctx, monitor)
-		}(monitor)
+		if err := m.Start(ctx); err != nil {
+			logger.GetLogger().
+				Error().
+				Err(err).
+				Str("chain", m.GetChainName().String()).
+				Msg("Error starting monitoring")
+		}
+		health.RegisterMonitor(ctx, m)
 
 	}
 

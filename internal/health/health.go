@@ -62,14 +62,14 @@ func RegisterMonitor(ctx context.Context, monitor interfaces.BlockchainMonitor) 
 			case <-ctx.Done():
 				return
 			default:
-				lastBlock, err := monitor.GetBlockHead()
+				blockhead, err := monitor.GetBlockHead()
 				if err != nil {
 					logger.GetLogger().Error().
 						Err(err).
 						Str("chain", monitor.GetChainName().String()).
 						Msg("Error getting latest block/slot")
 				} else {
-					updateBlockchainStatus(monitor.GetChainName().String(), lastBlock)
+					updateBlockchainStatus(monitor.GetChainName().String(), blockhead)
 				}
 				time.Sleep(10 * time.Second)
 			}
