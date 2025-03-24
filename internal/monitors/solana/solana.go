@@ -329,24 +329,7 @@ func (s *SolanaMonitor) getRecentTransactionDetails(address string) (SolanaTrans
 		return SolanaTransactionDetails{}, err
 	}
 
-	var txDetails struct {
-		Meta        Meta `json:"meta"`
-		Transaction struct {
-			Message struct {
-				AccountKeys []struct {
-					Pubkey   string `json:"pubkey"`
-					Signer   bool   `json:"signer"`
-					Source   string `json:"source"`
-					Writable bool   `json:"writable"`
-				} `json:"accountKeys"`
-				Instructions []struct {
-					ProgramIdIndex int      `json:"programIdIndex"`
-					Accounts       []string `json:"accounts"`
-					Data           string   `json:"data"`
-				} `json:"instructions"`
-			} `json:"message"`
-		} `json:"transaction"`
-	}
+	var txDetails TransactionDetailsRaw
 
 	if err := json.Unmarshal(txResp.Result, &txDetails); err != nil {
 		return SolanaTransactionDetails{}, fmt.Errorf("failed to parse transaction details: %w", err)

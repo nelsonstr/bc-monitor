@@ -4,6 +4,25 @@ import (
 	"time"
 )
 
+type TransactionDetailsRaw struct {
+	Meta        Meta `json:"meta"`
+	Transaction struct {
+		Message struct {
+			AccountKeys []struct {
+				Pubkey   string `json:"pubkey"`
+				Signer   bool   `json:"signer"`
+				Source   string `json:"source"`
+				Writable bool   `json:"writable"`
+			} `json:"accountKeys"`
+			Instructions []struct {
+				ProgramIdIndex int      `json:"programIdIndex"`
+				Accounts       []string `json:"accounts"`
+				Data           string   `json:"data"`
+			} `json:"instructions"`
+		} `json:"message"`
+	} `json:"transaction"`
+}
+
 type SolanaTransaction struct {
 	BlockTime   int64  `json:"blockTime"`
 	Meta        Meta   `json:"meta"`
