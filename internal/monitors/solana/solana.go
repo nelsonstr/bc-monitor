@@ -7,8 +7,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/gorilla/websocket"
 	"net/http"
-	"sync"
 	"time"
 )
 
@@ -16,12 +16,27 @@ var _ interfaces.BlockchainMonitor = (*SolanaMonitor)(nil)
 
 type SolanaMonitor struct {
 	*monitors.BaseMonitor
-	latestSlot uint64
+	latestSlot    uint64
+	wsConn        *websocket.Conn
+	subscriptions map[string]int
+}
+type AccountChange struct {
+	Jsonrpc string `json:"jsonrpc"`
+	Method  string `json:"method"`
+	Params  struct {
+		Result struct {
+			Value struct {
+				Lamports uint64 `json:"lamports"`
+			} `json:"value"`
+		} `json:"result"`
+		Subscription uint64 `json:"subscription"`
+	} `json:"params"`
 }
 
 func NewSolanaMonitor(baseMonitor *monitors.BaseMonitor) *SolanaMonitor {
 	return &SolanaMonitor{
-		BaseMonitor: baseMonitor,
+		BaseMonitor:   baseMonitor,
+		subscriptions: make(map[string]int),
 	}
 }
 
@@ -29,11 +44,13 @@ func (s *SolanaMonitor) Start(ctx context.Context) error {
 
 	if err := s.Initialize(); err != nil {
 		s.Logger.Fatal().Err(err).Msg("Failed to initialize Solana monitor")
+
 		return err
 	}
 
 	if err := s.StartMonitoring(ctx); err != nil {
 		s.Logger.Fatal().Err(err).Msg("Failed to start Solana monitoring")
+
 		return err
 	}
 
@@ -41,6 +58,19 @@ func (s *SolanaMonitor) Start(ctx context.Context) error {
 }
 
 func (s *SolanaMonitor) Initialize() error {
+	wsURL := fmt.Sprintf("wss://solana-mainnet.core.chainstack.com/c4fd316535159fd103cc0dad2a971ab5")
+
+	dialer := websocket.Dialer{
+		HandshakeTimeout: 10 * time.Second,
+	}
+	c, _, err := dialer.Dial(wsURL, nil)
+	if err != nil {
+
+		return fmt.Errorf("failed to connect to Solana WebSocket: %v", err)
+	}
+
+	s.wsConn = c
+
 	s.Client = &http.Client{
 		Timeout: 30 * time.Second,
 		Transport: &monitors.CustomTransport{
@@ -51,6 +81,7 @@ func (s *SolanaMonitor) Initialize() error {
 
 	slot, err := s.getLatestSlot()
 	if err != nil {
+
 		return fmt.Errorf("failed to connect to Solana RPC: %v", err)
 	}
 
@@ -68,230 +99,193 @@ func (s *SolanaMonitor) StartMonitoring(ctx context.Context) error {
 		Int("addressCount", len(s.Addresses)).
 		Msg("Starting Solana monitoring")
 
-	var wg sync.WaitGroup
 	for _, address := range s.Addresses {
-		wg.Add(1)
-		go func(addr string) {
-			defer wg.Done()
-			s.pollAccountChanges(ctx, addr)
-		}(address)
+		if err := s.subscribeToAccount(address); err != nil {
+			s.Logger.Error().Err(err).Str("address", address).Msg("Failed to subscribe to account")
+		}
 	}
 
-	wg.Wait()
+	//go s.handleWebSocketMessages(ctx)
 	return nil
 }
 
-func (s *SolanaMonitor) pollAccountChanges(ctx context.Context, address string) {
-	backoff := 1 * time.Second
-	maxBackoff := 30 * time.Second
-	var lastKnownBalance uint64
+func (s *SolanaMonitor) subscribeToAccount(address string) error {
+	//s.Mu.Lock()
+	//defer s.Mu.Unlock()
 
+	subscribeMsg := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "accountSubscribe",
+		"params": []interface{}{
+			address,
+			map[string]string{
+				"encoding":   "jsonParsed",
+				"commitment": "finalized",
+			},
+		},
+	}
+
+	if err := s.wsConn.WriteJSON(subscribeMsg); err != nil {
+		return fmt.Errorf("failed to subscribe to account %s: %v", address, err)
+	}
+
+	s.Logger.Debug().Str("address", address).Msg("Subscribed to account")
+
+	for {
+		_, message, err := s.wsConn.ReadMessage()
+		if err != nil {
+			s.Logger.Printf("Read error: %v", err)
+			continue
+		}
+
+		var change AccountChange
+		if err := json.Unmarshal(message, &change); err != nil {
+			s.Logger.Err(err).Msg("Decode error")
+			continue
+		}
+
+		if change.Method == "accountNotification" {
+			balance := float64(change.Params.Result.Value.Lamports) / 1e9
+
+			s.Logger.Info().
+				Any("value", balance).
+				Msg("Address balance changed")
+		}
+	}
+
+	return nil
+}
+
+func (s *SolanaMonitor) handleWebSocketMessages(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			s.Logger.Info().Msg("Stopping account polling")
 			return
 		default:
-			rpcResponse, err := s.MakeRPCCall("getAccountInfo", []interface{}{
-				address,
-				map[string]interface{}{
-					"encoding":   "jsonParsed",
-					"commitment": "confirmed",
-				},
-			})
-
+			var msg map[string]interface{}
+			err := s.wsConn.ReadJSON(&msg)
 			if err != nil {
-				s.Logger.Error().Err(err).Msg("Error making RPC call")
-				time.Sleep(backoff)
-				backoff = minDuration(backoff*2, maxBackoff)
+				s.Logger.Error().Err(err).Msg("Error reading WebSocket message")
 				continue
 			}
 
-			var response struct {
-				Value struct {
-					Lamports uint64 `json:"lamports"`
-				} `json:"value"`
+			if msg["method"] == "accountNotification" {
+				s.Logger.Info().Any("msg", msg).Msg("Received account notification")
+				s.processAccountNotification2(msg)
 			}
-
-			if err := json.Unmarshal(rpcResponse.Result, &response); err != nil {
-				s.Logger.Error().Err(err).Msg("Error parsing response")
-				time.Sleep(backoff)
-				backoff = minDuration(backoff*2, maxBackoff)
-				continue
-			}
-
-			currentBalance := response.Value.Lamports
-			if currentBalance != lastKnownBalance {
-				if lastKnownBalance > 0 {
-					balanceChange := int64(currentBalance) - int64(lastKnownBalance)
-					solAmount := float64(balanceChange) / 1e9
-
-					txDetails, err := s.getRecentTransactionDetails(address)
-					if err != nil {
-						s.Logger.Error().Err(err).Msg("Error fetching transaction details")
-					}
-
-					if balanceChange > 0 {
-						solAmount = -solAmount
-					}
-
-					event := models.TransactionEvent{
-						From:        txDetails.From,
-						To:          txDetails.To,
-						Amount:      fmt.Sprintf("%.9f", solAmount),
-						Fees:        fmt.Sprintf("%.9f", txDetails.Fees),
-						Chain:       s.GetChainName(),
-						TxHash:      txDetails.TxHash,
-						Timestamp:   txDetails.Timestamp,
-						ExplorerURL: s.GetExplorerURL(txDetails.TxHash),
-					}
-
-					s.Logger.Info().
-						Str("chain", string(event.Chain)).
-						Str("from", event.From).
-						Str("to", event.To).
-						Str("amount", event.Amount).
-						Str("fees", event.Fees).
-						Str("txHash", event.TxHash).
-						Time("timestamp", event.Timestamp).
-						Msg("STORAGE VALUES")
-
-					if err := s.EventEmitter.EmitEvent(event); err != nil {
-						s.Logger.Error().Err(err).Msg("Error emitting event")
-						return
-					}
-				} else {
-					s.Logger.Info().
-						Str("address", address).
-						Uint64("balance", currentBalance).
-						Float64("balanceSOL", float64(currentBalance)/1e9).
-						Msg("Initial balance")
-				}
-
-				lastKnownBalance = currentBalance
-			}
-
-			backoff = 1 * time.Second
-			time.Sleep(5 * time.Second)
+			s.Logger.Info().
+				Any("method", msg["method"]).
+				Msg("Processed WebSocket message")
 		}
 	}
 }
 
-func minDuration(a, b time.Duration) time.Duration {
-	if a < b {
-		return a
+func (s *SolanaMonitor) processAccountNotification2(msg map[string]interface{}) {
+	params, ok := msg["params"].(map[string]interface{})
+	if !ok {
+		s.Logger.Error().Msg("Invalid account notification format")
+		return
 	}
-	return b
+
+	result, ok := params["result"].(map[string]interface{})
+	if !ok {
+		s.Logger.Error().Msg("Invalid result format in account notification")
+		return
+	}
+
+	value, ok := result["value"].(map[string]interface{})
+	if !ok {
+		s.Logger.Error().Msg("Invalid value format in account notification")
+		return
+	}
+
+	lamports, ok := value["lamports"].(float64)
+	if !ok {
+		s.Logger.Error().Msg("Invalid lamports format in account notification")
+		return
+	}
+
+	address, ok := params["subscription"].(float64)
+	if !ok {
+		s.Logger.Error().Msg("Invalid subscription format in account notification")
+		return
+	}
+
+	s.Logger.Info().
+		Float64("lamports", lamports).
+		Float64("balanceSOL", lamports/1e9).
+		Float64("subscriptionID", address).
+		Msg("Account balance update")
+
 }
 
-func (s *SolanaMonitor) getLatestSlot() (uint64, error) {
-	resp, err := s.MakeRPCCall("getSlot", nil)
-	if err != nil {
-		return 0, err
+func (s *SolanaMonitor) processAccountNotification(msg string) {
+	address := "string"
+	var lastKnownBalance uint64
+
+	var response struct {
+		Value struct {
+			Lamports uint64 `json:"lamports"`
+		} `json:"value"`
 	}
 
-	var slotResp uint64
-	if err := json.Unmarshal(resp.Result, &slotResp); err != nil {
-		return 0, err
+	if err := json.Unmarshal([]byte(msg), &response); err != nil {
+		s.Logger.Error().Err(err).Msg("Error parsing response")
+		return
 	}
 
-	return slotResp, nil
-}
+	currentBalance := response.Value.Lamports
+	if currentBalance != lastKnownBalance {
+		if lastKnownBalance > 0 {
+			balanceChange := int64(currentBalance) - int64(lastKnownBalance)
+			solAmount := float64(balanceChange) / 1e9
 
-func (s *SolanaMonitor) getBlock(slot uint64) ([]SolanaTransaction, error) {
-	resp, err := s.MakeRPCCall("getBlock", []interface{}{
-		slot,
-		map[string]interface{}{
-			"encoding":                       "json",
-			"maxSupportedTransactionVersion": 0,
-			"transactionDetails":             "full",
-			"rewards":                        false,
-		},
-	})
-	if err != nil {
-		return nil, err
-	}
+			txDetails, err := s.getRecentTransactionDetails(address)
+			if err != nil {
+				s.Logger.Error().Err(err).Msg("Error fetching transaction details")
+			}
 
-	var blockResp struct {
-		Transactions []SolanaTransaction `json:"transactions"`
-	}
-	if err := json.Unmarshal(resp.Result, &blockResp); err != nil {
-		return nil, err
-	}
-
-	return blockResp.Transactions, nil
-}
-
-func (s *SolanaMonitor) processTransaction(tx SolanaTransaction, watchAddresses map[string]bool) {
-	accounts := tx.Transaction.Message.AccountKeys
-
-	for i, account := range accounts {
-		if watchAddresses[account] {
-			var source, destination string
-			var amount string
-
-			if i == 0 {
-				source = account
-				if len(accounts) > 1 {
-					destination = accounts[1]
-				}
-
-				if len(tx.Meta.PreBalances) > 0 && len(tx.Meta.PostBalances) > 0 {
-					preBalance := tx.Meta.PreBalances[i]
-					postBalance := tx.Meta.PostBalances[i]
-
-					if preBalance > postBalance {
-						amountLamports := preBalance - postBalance - tx.Meta.Fee
-						amount = convertLaports2Sol(amountLamports)
-					}
-				}
-
-				s.Logger.Info().
-					Str("address", account).
-					Msg("Detected outgoing transaction from watched address")
-			} else {
-				destination = account
-				source = accounts[0]
-
-				if len(tx.Meta.PreBalances) > i && len(tx.Meta.PostBalances) > i {
-					preBalance := tx.Meta.PreBalances[i]
-					postBalance := tx.Meta.PostBalances[i]
-					if postBalance > preBalance {
-						amountLamports := postBalance - preBalance
-						amount = convertLaports2Sol(amountLamports)
-					}
-				}
-
-				s.Logger.Info().
-					Str("address", account).
-					Msg("Detected incoming transaction to watched address")
+			if balanceChange > 0 {
+				solAmount = -solAmount
 			}
 
 			event := models.TransactionEvent{
-				From:        source,
-				To:          destination,
-				Amount:      amount,
-				Fees:        convertLaports2Sol(tx.Meta.Fee),
+				From:        txDetails.From,
+				To:          txDetails.To,
+				Amount:      fmt.Sprintf("%.9f", solAmount),
+				Fees:        fmt.Sprintf("%.9f", txDetails.Fees),
 				Chain:       s.GetChainName(),
-				TxHash:      tx.Transaction.Signatures[0],
-				Timestamp:   time.Unix(tx.BlockTime, 0),
-				ExplorerURL: s.GetExplorerURL(tx.Transaction.Signatures[0]),
+				TxHash:      txDetails.TxHash,
+				Timestamp:   txDetails.Timestamp,
+				ExplorerURL: s.GetExplorerURL(txDetails.TxHash),
 			}
+
+			s.Logger.Info().
+				Str("chain", string(event.Chain)).
+				Str("from", event.From).
+				Str("to", event.To).
+				Str("amount", event.Amount).
+				Str("fees", event.Fees).
+				Str("txHash", event.TxHash).
+				Time("timestamp", event.Timestamp).
+				Msg("STORAGE VALUES")
 
 			if err := s.EventEmitter.EmitEvent(event); err != nil {
 				s.Logger.Error().Err(err).Msg("Error emitting event")
+				return
 			}
-			break
+		} else {
+			s.Logger.Info().
+				Str("address", address).
+				Uint64("balance", currentBalance).
+				Float64("balanceSOL", float64(currentBalance)/1e9).
+				Msg("Initial balance")
 		}
+
+		lastKnownBalance = currentBalance
 	}
-}
 
-func convertLaports2Sol(amountLamports uint64) string {
-	return fmt.Sprintf("%.9f", float64(amountLamports)/1e9)
-}
-
-func (s *SolanaMonitor) GetExplorerURL(txHash string) string {
-	return fmt.Sprintf("https://solscan.io/tx/%s", txHash)
 }
 
 func (s *SolanaMonitor) getRecentTransactionDetails(address string) (SolanaTransactionDetails, error) {
@@ -389,6 +383,48 @@ func (s *SolanaMonitor) getRecentTransactionDetails(address string) (SolanaTrans
 	}, nil
 }
 
+func (s *SolanaMonitor) getLatestSlot() (uint64, error) {
+	resp, err := s.MakeRPCCall("getSlot", nil)
+	if err != nil {
+		return 0, err
+	}
+
+	var slotResp uint64
+	if err := json.Unmarshal(resp.Result, &slotResp); err != nil {
+		return 0, err
+	}
+
+	return slotResp, nil
+}
+
+func (s *SolanaMonitor) getBlock(slot uint64) ([]SolanaTransaction, error) {
+	resp, err := s.MakeRPCCall("getBlock", []interface{}{
+		slot,
+		map[string]interface{}{
+			"encoding":                       "json",
+			"maxSupportedTransactionVersion": 0,
+			"transactionDetails":             "full",
+			"rewards":                        false,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var blockResp struct {
+		Transactions []SolanaTransaction `json:"transactions"`
+	}
+	if err := json.Unmarshal(resp.Result, &blockResp); err != nil {
+		return nil, err
+	}
+
+	return blockResp.Transactions, nil
+}
+
+func (s *SolanaMonitor) GetExplorerURL(txHash string) string {
+	return fmt.Sprintf("https://solscan.io/tx/%s", txHash)
+}
+
 func (s *SolanaMonitor) GetBlockHead() (uint64, error) {
 	resp, err := s.MakeRPCCall("getSlot", nil)
 	if err != nil {
@@ -417,8 +453,11 @@ func (s *SolanaMonitor) AddAddress(address string) error {
 	// Add the new address
 	s.Addresses = append(s.Addresses, address)
 
-	// Start monitoring the new address
-	go s.pollAccountChanges(context.Background(), address)
+	// Subscribe to the new address
+	if err := s.subscribeToAccount(address); err != nil {
+		s.Logger.Error().Err(err).Str("address", address).Msg("Failed to subscribe to new address")
+		return err
+	}
 
 	s.Logger.Info().
 		Str("address", address).
@@ -430,8 +469,11 @@ func (s *SolanaMonitor) AddAddress(address string) error {
 func (s *SolanaMonitor) Stop(_ context.Context) error {
 	s.Logger.Info().Msg("Stopping solana monitor")
 
-	// Close the HTTP client
 	s.CloseHTTPClient()
+
+	if s.wsConn != nil {
+		s.wsConn.Close()
+	}
 
 	return nil
 }
