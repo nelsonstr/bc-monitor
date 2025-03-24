@@ -236,7 +236,6 @@ func (e *EthereumMonitor) processSingleTransaction(tx EthereumTransaction, watch
 				Str("amount", event.Amount).
 				Str("fees", event.Fees).
 				Str("txHash", tx.Hash).
-				Str("ExplorerURL", e.GetExplorerURL(tx.Hash)).
 				Msg("Emitted transaction event")
 			if err := e.EventEmitter.EmitEvent(event); err != nil {
 				e.Logger.Error().

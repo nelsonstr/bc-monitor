@@ -69,6 +69,7 @@ func (s *BaseMonitor) MakeRPCCall(method string, params []interface{}) (*models.
 		Str("method", method).
 		Interface("params", params).
 		Msg("Making RPC call")
+
 	// Wait for rate limit
 	if err := s.RateLimiter.Wait(context.Background()); err != nil {
 		s.Logger.Error().Err(err).Msg("Rate limit error")
@@ -86,11 +87,6 @@ func (s *BaseMonitor) MakeRPCCall(method string, params []interface{}) (*models.
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %v", err)
 	}
-
-	s.Logger.Debug().
-		Str("method", method).
-		Interface("params", params).
-		Msg("Making RPC call")
 
 	req, err := http.NewRequest("POST", s.RpcEndpoint, bytes.NewReader(payload))
 	if err != nil {
