@@ -190,32 +190,48 @@ http://127.0.0.1:8888/healthz
 
 ---
 
-## Mandatory task
-Given a list of Bitcoin, Ethereum, and Solana addresses associated to a `userId` (assume 1 per chain for example)
-create a microservice in Golang that monitors the blockchains for any transactions involving those addresses.
+[//]: # (## Mandatory task)
 
-In summary, the service should:
+[//]: # (Given a list of Bitcoin, Ethereum, and Solana addresses associated to a `userId` &#40;assume 1 per chain for example&#41;)
 
-1. Connect via RPC to the Bitcoin, Ethereum, and Solana blockchains using Blockdaemon (feel free to use another provider if you prefer).
+[//]: # (create a microservice in Golang that monitors the blockchains for any transactions involving those addresses.)
 
-2. Consume the appropriate information to detect all future transactions that involve the specified addresses.
+[//]: # ()
+[//]: # (In summary, the service should:)
 
-3. For the filtered transactions, process the payload and output the following information:
-- Source
-- Destination
-- Amount
-- Fees
+[//]: # ()
+[//]: # (1. Connect via RPC to the Bitcoin, Ethereum, and Solana blockchains using Blockdaemon &#40;feel free to use another provider if you prefer&#41;.)
 
-This output should be in the form of an event emitted by a Kafka producer.
+[//]: # ()
+[//]: # (2. Consume the appropriate information to detect all future transactions that involve the specified addresses.)
 
-The service should be designed for scalability, capable of processing blocks in real time (be mindful of Solana's speed!).
+[//]: # ()
+[//]: # (3. For the filtered transactions, process the payload and output the following information:)
 
-## Bonus task
-Not mandatory, but appreciated:
+[//]: # (- Source)
 
-Bonus 1: Add a Mermaid diagram to illustrate your solution.
+[//]: # (- Destination)
 
-Bonus 2: Explain (no need to code) how you would handle edge cases like retry situations, block reorganization, how to not lose any txs in a 1h downtime scenario, and any other scenarios you want to showcase.
+[//]: # (- Amount)
+
+[//]: # (- Fees)
+
+[//]: # ()
+[//]: # (This output should be in the form of an event emitted by a Kafka producer.)
+
+[//]: # ()
+[//]: # (The service should be designed for scalability, capable of processing blocks in real time &#40;be mindful of Solana's speed!&#41;.)
+
+[//]: # ()
+[//]: # (## Bonus task)
+
+[//]: # (Not mandatory, but appreciated:)
+
+[//]: # ()
+[//]: # (Bonus 1: Add a Mermaid diagram to illustrate your solution.)
+
+[//]: # ()
+[//]: # (Bonus 2: Explain &#40;no need to code&#41; how you would handle edge cases like retry situations, block reorganization, how to not lose any txs in a 1h downtime scenario, and any other scenarios you want to showcase.)
 
 ## RPC Docs
 

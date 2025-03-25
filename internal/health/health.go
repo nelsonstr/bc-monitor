@@ -12,8 +12,8 @@ import (
 )
 
 type BlockchainStatus struct {
-	Name            string `json:"name"`
-	LastBlockOrSlot uint64 `json:"last_block_or_slot"`
+	Name      string `json:"name"`
+	LastBlock uint64 `json:"last_block"`
 }
 
 var (
@@ -81,7 +81,7 @@ func updateBlockchainStatus(name string, lastBlockOrSlot uint64) {
 	statusMutex.Lock()
 	defer statusMutex.Unlock()
 	blockchainStatuses[name] = &BlockchainStatus{
-		Name:            name,
-		LastBlockOrSlot: lastBlockOrSlot,
+		Name:      name,
+		LastBlock: lastBlockOrSlot,
 	}
 }
