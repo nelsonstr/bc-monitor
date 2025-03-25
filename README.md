@@ -24,7 +24,7 @@
         * block
         * parent block
         * transaction hash
-    * create and endpoint to manage the user wallets to monitor
+    * add kafka queue to manage the user wallets to monitor
     * add prometheus metrics
     * add monitoring 
     * create unit tests
@@ -214,7 +214,7 @@ The addresses to monitor are configured at [addresses](cmd/add_addresses.go)
 Example
 
 ```go
-models.User{
+ User{
     ID: "a4b21045-ea18-42f0-bfe0-798ed7f7a6cb",
     Addresses: map[models.BlockchainName][]string{
         models.Ethereum: {"0x95222290DD7278Aa3Ddd389Cc1E1d165CC4BAfe5"},

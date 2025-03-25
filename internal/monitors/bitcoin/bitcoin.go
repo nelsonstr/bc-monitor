@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 )
 
@@ -70,6 +69,7 @@ func (b *BitcoinMonitor) Initialize() error {
 	b.blockHead = blockHead
 
 	b.Logger.Info().
+		Str("bestBlockHash", bestBlockHash).
 		Uint64("blockNumber", blockHead).
 		Msg("Connected to Bitcoin node")
 
@@ -119,7 +119,7 @@ func (b *BitcoinMonitor) GetBlockHead() (uint64, error) {
 }
 
 func (b *BitcoinMonitor) monitorBlocks(ctx context.Context) {
-	ticker := time.NewTicker(1 * time.Minute)
+	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -138,8 +138,14 @@ func (b *BitcoinMonitor) monitorBlocks(ctx context.Context) {
 					Msg("Failed to get current Bitcoin block hash")
 				continue
 			}
+			b.Logger.Debug().Str("currentBlockHash", currentBlockHash).
+				Str("bestBlockHash", b.latestBlockHash).
+				Msg("BTC")
 
 			if currentBlockHash != b.latestBlockHash {
+				b.Logger.Debug().Str("currentBlockHash", currentBlockHash).
+					Str("bestBlockHash", b.latestBlockHash).
+					Msg("BTC new block")
 				blockHeight, err := b.processBlock(currentBlockHash)
 				if err != nil {
 					b.Logger.Error().
@@ -151,6 +157,9 @@ func (b *BitcoinMonitor) monitorBlocks(ctx context.Context) {
 
 				b.Mu.Lock()
 				b.latestBlockHash = currentBlockHash
+				b.Logger.Info().
+					Str("blockHash", currentBlockHash).
+					Msg("BTC - Updated to block")
 				b.blockHead = blockHeight
 				b.Mu.Unlock()
 
@@ -192,14 +201,31 @@ func (b *BitcoinMonitor) processTransaction(txHash string) error {
 		return fmt.Errorf("failed to get transaction %s details: %v", txHash, err)
 	}
 
+	// iterate over the transaction outputs to find the watched addresses
 	for _, vout := range txDetails.Vout {
-		for _, addr := range vout.ScriptPubKey.Addresses {
-			b.Logger.Info().
-				Str("address", addr).
-				Str("txHash", txHash).Msg("Received BTC from address")
-			if b.IsWatchedAddress(addr) {
-				b.emitTransactionEvent(txDetails, addr, vout.Value)
-				break
+
+		if b.IsWatchedAddress(vout.ScriptPubKey.Address) {
+			var fromAddrs []string
+			var inputSum float64
+
+			for _, vin := range txDetails.Vin {
+				f, val, err := b.getPrevOutputValue(vin.TxID, vin.Vout)
+				if err != nil {
+					b.Logger.Err(err).Msg("Warning: failed to fetch input value")
+					continue
+				}
+				fromAddrs = append(fromAddrs, f)
+				inputSum += val
+			}
+			var outputSum float64
+			for _, vout := range txDetails.Vout {
+				outputSum += vout.Value
+			}
+			fees := inputSum - outputSum
+
+			// send an event for each watched address involved in the transaction
+			for _, addr := range fromAddrs {
+				b.emitTransactionEvent(txDetails, addr, vout.ScriptPubKey.Address, vout.Value, fees)
 			}
 		}
 	}
@@ -244,13 +270,27 @@ func (b *BitcoinMonitor) getTransaction(txHash string) (*TransactionDetails, err
 	return &tx, nil
 }
 
-func (b *BitcoinMonitor) emitTransactionEvent(tx *TransactionDetails, address string, amount float64) {
+func (b *BitcoinMonitor) getPrevOutputValue(txid string, voutIndex int) (string, float64, error) {
+	prevTx, err := b.getTransaction(txid)
+
+	if err != nil {
+		return "", 0, err
+	}
+	for _, vout := range prevTx.Vout {
+		if vout.N == voutIndex {
+			return vout.ScriptPubKey.Address, vout.Value, nil // value in sats
+		}
+	}
+	return "", 0, fmt.Errorf("vout %d not found in tx %s", voutIndex, txid)
+}
+
+func (b *BitcoinMonitor) emitTransactionEvent(tx *TransactionDetails, from, to string, amount, fees float64) {
 	event := models.TransactionEvent{
 		Chain:       b.GetChainName(),
-		From:        tx.Vin[0].Txid, // Simplified; you might need to get the actual source address
-		To:          address,
+		From:        from,
+		To:          to,
 		Amount:      fmt.Sprintf("%f", amount),
-		Fees:        fmt.Sprintf("%f", tx.Fees),
+		Fees:        fmt.Sprintf("%f", fees),
 		TxHash:      tx.Txid,
 		Timestamp:   time.Unix(tx.Time, 0),
 		ExplorerURL: b.GetExplorerURL(tx.Txid),
@@ -265,10 +305,12 @@ func (b *BitcoinMonitor) emitTransactionEvent(tx *TransactionDetails, address st
 }
 
 func (b *BitcoinMonitor) AddAddress(address string) error {
+	b.Logger.Info().
+		Str("address", address).
+		Msg("Adding address to watch list")
 	b.Mu.Lock()
 	defer b.Mu.Unlock()
 
-	address = strings.ToLower(address)
 	// Check if the address is already being monitored
 	for _, watchedAddr := range b.Addresses {
 		if watchedAddr == address {
