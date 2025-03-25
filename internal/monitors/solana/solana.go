@@ -10,7 +10,6 @@ import (
 	"math/big"
 	"net/http"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -25,7 +24,7 @@ type SolanaMonitor struct {
 	wsMu          *sync.Mutex
 	blockHead     uint64
 	wsConn        *websocket.Conn
-	subscriptions map[string]int // Changed from map[string]int to map[string]int
+	subscriptions map[string]int
 	balances      map[string]*big.Int
 }
 
@@ -50,7 +49,7 @@ func (s *SolanaMonitor) Start(ctx context.Context) error {
 }
 
 func (s *SolanaMonitor) Initialize() error {
-	wsURL := fmt.Sprintf(os.Getenv("SOLANA_WSS_ENDPOINT"))
+	wsURL := os.Getenv("SOLANA_WSS_ENDPOINT")
 
 	dialer := websocket.Dialer{
 		HandshakeTimeout: 10 * time.Second,
@@ -87,8 +86,6 @@ func (s *SolanaMonitor) Initialize() error {
 func (s *SolanaMonitor) AddAddress(address string) error {
 	s.Mu.Lock()
 	defer s.Mu.Unlock()
-
-	address = strings.ToLower(address)
 
 	// Check if the address is already being monitored
 	for _, addr := range s.Addresses {
@@ -482,7 +479,7 @@ func (s *SolanaMonitor) GetAccountBalance(address string) (uint64, error) {
 		address,
 		map[string]interface{}{
 			"encoding":   "jsonParsed",
-			"commitment": "confirmed",
+			"commitment": "finalized",
 		},
 	})
 	if err != nil {

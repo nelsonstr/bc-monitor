@@ -151,7 +151,7 @@ func (e *EthereumMonitor) getBalance(address string) (*big.Int, uint64, error) {
 }
 
 func (e *EthereumMonitor) monitorBlocks(ctx context.Context) {
-	ticker := time.NewTicker(15 * time.Second)
+	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
 	for {

@@ -119,7 +119,7 @@ func (b *BitcoinMonitor) GetBlockHead() (uint64, error) {
 }
 
 func (b *BitcoinMonitor) monitorBlocks(ctx context.Context) {
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
 	for {
@@ -194,6 +194,9 @@ func (b *BitcoinMonitor) processTransaction(txHash string) error {
 
 	for _, vout := range txDetails.Vout {
 		for _, addr := range vout.ScriptPubKey.Addresses {
+			b.Logger.Info().
+				Str("address", addr).
+				Str("txHash", txHash).Msg("Received BTC from address")
 			if b.IsWatchedAddress(addr) {
 				b.emitTransactionEvent(txDetails, addr, vout.Value)
 				break
