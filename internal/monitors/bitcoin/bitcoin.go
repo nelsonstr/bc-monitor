@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -193,7 +194,7 @@ func (b *BitcoinMonitor) processTransaction(txHash string) error {
 
 	for _, vout := range txDetails.Vout {
 		for _, addr := range vout.ScriptPubKey.Addresses {
-			if b.isWatchedAddress(addr) {
+			if b.IsWatchedAddress(addr) {
 				b.emitTransactionEvent(txDetails, addr, vout.Value)
 				break
 			}
@@ -240,18 +241,6 @@ func (b *BitcoinMonitor) getTransaction(txHash string) (*TransactionDetails, err
 	return &tx, nil
 }
 
-func (b *BitcoinMonitor) isWatchedAddress(address string) bool {
-	b.Mu.RLock()
-	defer b.Mu.RUnlock()
-
-	for _, watchedAddr := range b.Addresses {
-		if watchedAddr == address {
-			return true
-		}
-	}
-	return false
-}
-
 func (b *BitcoinMonitor) emitTransactionEvent(tx *TransactionDetails, address string, amount float64) {
 	event := models.TransactionEvent{
 		Chain:       b.GetChainName(),
@@ -276,6 +265,7 @@ func (b *BitcoinMonitor) AddAddress(address string) error {
 	b.Mu.Lock()
 	defer b.Mu.Unlock()
 
+	address = strings.ToLower(address)
 	// Check if the address is already being monitored
 	for _, watchedAddr := range b.Addresses {
 		if watchedAddr == address {

@@ -10,6 +10,7 @@ import (
 	"math/big"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -86,6 +87,8 @@ func (s *SolanaMonitor) Initialize() error {
 func (s *SolanaMonitor) AddAddress(address string) error {
 	s.Mu.Lock()
 	defer s.Mu.Unlock()
+
+	address = strings.ToLower(address)
 
 	// Check if the address is already being monitored
 	for _, addr := range s.Addresses {

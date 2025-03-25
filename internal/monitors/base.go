@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -144,4 +145,19 @@ func (b *BaseMonitor) CloseHTTPClient() {
 	if b.Client != nil {
 		b.Client.CloseIdleConnections()
 	}
+}
+
+func (b *BaseMonitor) IsWatchedAddress(address string) bool {
+	b.Mu.RLock()
+	defer b.Mu.RUnlock()
+
+	address = strings.ToLower(address)
+
+	for _, watchedAddr := range b.Addresses {
+		if watchedAddr == address {
+			return true
+		}
+	}
+
+	return false
 }

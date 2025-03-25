@@ -24,6 +24,9 @@ type EthereumMonitor struct {
 func (e *EthereumMonitor) AddAddress(address string) error {
 	e.Mu.Lock()
 	defer e.Mu.Unlock()
+
+	address = strings.ToLower(address)
+
 	// Check if the address is already being monitored
 	for _, watchedAddr := range e.Addresses {
 		if watchedAddr == address {
@@ -81,7 +84,10 @@ func (e *EthereumMonitor) Initialize() error {
 
 func (e *EthereumMonitor) StartMonitoring(ctx context.Context) error {
 
-	watchAddresses := make(map[string]bool)
+	e.Mu.Lock()
+	defer e.Mu.Unlock()
+
+	watchAddresses := make(map[string]bool, len(e.Addresses))
 	for _, addr := range e.Addresses {
 		watchAddresses[strings.ToLower(addr)] = true
 	}
@@ -98,7 +104,7 @@ func (e *EthereumMonitor) StartMonitoring(ctx context.Context) error {
 		Uint64("blockNumber", latestBlock).
 		Msg("Starting Ethereum monitoring")
 
-	go e.monitorBlocks(ctx, watchAddresses)
+	go e.monitorBlocks(ctx)
 
 	return nil
 }
@@ -144,7 +150,7 @@ func (e *EthereumMonitor) getBalance(address string) (*big.Int, uint64, error) {
 	return balance, blockNumber, nil
 }
 
-func (e *EthereumMonitor) monitorBlocks(ctx context.Context, watchAddresses map[string]bool) {
+func (e *EthereumMonitor) monitorBlocks(ctx context.Context) {
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 
@@ -161,7 +167,7 @@ func (e *EthereumMonitor) monitorBlocks(ctx context.Context, watchAddresses map[
 			}
 
 			for blockNum := e.latestBlock + 1; blockNum <= currentBlock; blockNum++ {
-				if err := e.processBlock(blockNum, watchAddresses); err != nil {
+				if err := e.processBlock(blockNum); err != nil {
 					e.Logger.Error().Err(err).Uint64("blockNumber", blockNum).Msg("Error processing Ethereum block")
 					continue
 				}
@@ -173,7 +179,7 @@ func (e *EthereumMonitor) monitorBlocks(ctx context.Context, watchAddresses map[
 	}
 }
 
-func (e *EthereumMonitor) processBlock(blockNum uint64, watchAddresses map[string]bool) error {
+func (e *EthereumMonitor) processBlock(blockNum uint64) error {
 	params := []interface{}{fmt.Sprintf("0x%x", blockNum), true}
 	result, err := e.MakeRPCCall("eth_getBlockByNumber", params)
 	if err != nil {
@@ -205,7 +211,7 @@ func (e *EthereumMonitor) processBlock(blockNum uint64, watchAddresses map[strin
 	}
 
 	for i, tx := range blockDetails.Transactions {
-		if err := e.processSingleTransaction(tx, watchAddresses, timestamp, blockDetails.BaseFeePerGas); err != nil {
+		if err := e.processSingleTransaction(tx, timestamp, blockDetails.BaseFeePerGas); err != nil {
 			e.Logger.Warn().
 				Err(err).
 				Int("index", i).
@@ -223,30 +229,46 @@ func (e *EthereumMonitor) processBlock(blockNum uint64, watchAddresses map[strin
 	return nil
 }
 
-func (e *EthereumMonitor) processSingleTransaction(tx EthereumTransaction, watchAddresses map[string]bool, blockTime uint64, baseFeePerGas string) error {
+func (e *EthereumMonitor) processSingleTransaction(tx EthereumTransaction, blockTime uint64, baseFeePerGas string) error {
 	from := strings.ToLower(tx.From)
 	to := strings.ToLower(tx.To)
 
-	if watchAddresses[from] || watchAddresses[to] {
-		event := e.processTransaction(tx, from, to, blockTime, baseFeePerGas)
-		if e.EventEmitter != nil {
-			e.Logger.Info().
-				Str("from", from).
-				Str("to", to).
-				Str("amount", event.Amount).
-				Str("fees", event.Fees).
-				Str("txHash", tx.Hash).
-				Msg("Emitted transaction event")
-			if err := e.EventEmitter.EmitEvent(event); err != nil {
-				e.Logger.Error().
-					Err(err).
-					Msg("Error emitting transaction event")
-				return nil
-			}
+	e.Logger.Debug().
+		Str("from", from).
+		Str("to", to).
+		Str("e.Addresses", strings.Join(e.Addresses, ",")).
+		Msg("Processing Ethereum transaction")
 
-		} else {
-			e.Logger.Warn().Msg("EventEmitter is nil, cannot emit event")
+	found := false
+	for _, addr := range e.Addresses {
+		if addr == from || addr == to {
+			found = true
+
+			break
 		}
+	}
+
+	if !found {
+		return nil
+	}
+	event := e.processTransaction(tx, from, to, blockTime, baseFeePerGas)
+	if e.EventEmitter != nil {
+		e.Logger.Info().
+			Str("from", from).
+			Str("to", to).
+			Str("amount", event.Amount).
+			Str("fees", event.Fees).
+			Str("txHash", tx.Hash).
+			Msg("Emitted transaction event")
+		if err := e.EventEmitter.EmitEvent(event); err != nil {
+			e.Logger.Error().
+				Err(err).
+				Msg("Error emitting transaction event")
+			return nil
+		}
+
+	} else {
+		e.Logger.Warn().Msg("EventEmitter is nil, cannot emit event")
 	}
 
 	return nil
