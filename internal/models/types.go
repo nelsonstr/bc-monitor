@@ -5,9 +5,8 @@ import (
 )
 
 type User struct {
-	Id string
-
-	Addresess map[BlockchainName][]string
+	ID        string
+	Addresses map[BlockchainName][]string
 }
 
 // TransactionEvent represents a blockchain transaction event

@@ -9,8 +9,8 @@ import (
 func addAddressesToMonitor(monitors map[models.BlockchainName]interfaces.BlockchainMonitor) {
 
 	user := models.User{
-		Id: "a4b21045-ea18-42f0-bfe0-798ed7f7a6cb",
-		Addresess: map[models.BlockchainName][]string{
+		ID: "a4b21045-ea18-42f0-bfe0-798ed7f7a6cb",
+		Addresses: map[models.BlockchainName][]string{
 			models.Ethereum: {"0x95222290DD7278Aa3Ddd389Cc1E1d165CC4BAfe5"},
 			models.Solana: {
 				"5guD4Uz462GT4Y4gEuqyGsHZ59JGxFN4a3rF6KWguMcJ",
@@ -21,7 +21,7 @@ func addAddressesToMonitor(monitors map[models.BlockchainName]interfaces.Blockch
 				"bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh"},
 		},
 	}
-	for bc, add := range user.Addresess {
+	for bc, add := range user.Addresses {
 		for _, addr := range add {
 			if monitors[bc] == nil {
 				continue
