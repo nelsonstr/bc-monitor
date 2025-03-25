@@ -5,7 +5,7 @@
     * block reorganization
         * the orphans blocks must be drop as the transactions
           it should stay in persisted but not include in any balance change
-    
+        * create a monitor to identify reorgs
     * how to not lose any txs in a 1h downtime scenario
         * when the current application status is store
           on startup if must load  the address to monitor, and the last scanned block
