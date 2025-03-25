@@ -33,7 +33,7 @@
 
 * Known issues:
     * Ethereum fees calculator not working with EIP-1559
-    * blockdaemon websocket not working, we wss is using Chainstack. This can create some sync issues.
+    * blockdaemon websocket not working, we wss is using Chainstack.
 
 # Mermaid diagram to illustrate the solution
 
