@@ -41,13 +41,14 @@ type DatabaseConfig struct {
 	Password string
 	DBName   string
 	SSLMode  string
+}
+
 // RedisConfig holds Redis configuration
 type RedisConfig struct {
 	Host     string
 	Port     int
 	Password string
 	DB       int
-}
 }
 
 // ChainConfig holds configuration for each blockchain
