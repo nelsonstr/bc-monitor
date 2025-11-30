@@ -19,31 +19,33 @@ import (
 
 // BaseMonitor contains common fields and methods for all blockchain monitors
 type BaseMonitor struct {
-	ApiKey         string
-	RpcEndpoint    string
-	EventEmitter   interfaces.EventEmitter
-	Addresses      []string
-	MaxRetries     int
-	RetryDelay     time.Duration
-	RateLimiter    *rate.Limiter
-	Mu             sync.RWMutex
-	Client         *http.Client
-	Logger         *zerolog.Logger
-	BlockchainName models.BlockchainName
+	ApiKey          string
+	RpcEndpoint     string
+	ExplorerBaseURL string
+	EventEmitter    interfaces.EventEmitter
+	Addresses       []string
+	MaxRetries      int
+	RetryDelay      time.Duration
+	RateLimiter     *rate.Limiter
+	Mu              sync.RWMutex
+	Client          *http.Client
+	Logger          *zerolog.Logger
+	BlockchainName  models.BlockchainName
 }
 
 // NewBaseMonitor creates a new BaseMonitor with the given parameters
-func NewBaseMonitor(blockchain models.BlockchainName, rateLimit float64, rpcEndpoint, apiKey string, logger *zerolog.Logger, emitter *events.GatewayEmitter) *BaseMonitor {
+func NewBaseMonitor(blockchain models.BlockchainName, rateLimit float64, rpcEndpoint, apiKey, explorerBaseURL string, logger *zerolog.Logger, emitter *events.GatewayEmitter) *BaseMonitor {
 	return &BaseMonitor{
-		Logger:         logger,
-		Addresses:      []string{},
-		RpcEndpoint:    rpcEndpoint,
-		ApiKey:         apiKey,
-		RateLimiter:    rate.NewLimiter(rate.Limit(rateLimit), 1),
-		MaxRetries:     1,
-		RetryDelay:     time.Second,
-		EventEmitter:   emitter,
-		BlockchainName: blockchain,
+		Logger:          logger,
+		Addresses:       []string{},
+		RpcEndpoint:     rpcEndpoint,
+		ApiKey:          apiKey,
+		ExplorerBaseURL: explorerBaseURL,
+		RateLimiter:     rate.NewLimiter(rate.Limit(rateLimit), 1),
+		MaxRetries:      1,
+		RetryDelay:      time.Second,
+		EventEmitter:    emitter,
+		BlockchainName:  blockchain,
 	}
 }
 

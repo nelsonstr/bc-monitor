@@ -16,6 +16,7 @@ type Config struct {
 	RetryDelay time.Duration
 	HTTP       HTTPConfig
 	Kafka      KafkaConfig
+	Database   DatabaseConfig
 	Chains     map[models.BlockchainName]ChainConfig
 }
 
@@ -32,11 +33,29 @@ type KafkaConfig struct {
 	BatchTimeout  time.Duration
 }
 
+// DatabaseConfig holds database configuration
+type DatabaseConfig struct {
+	Host     string
+	Port     int
+	User     string
+	Password string
+	DBName   string
+	SSLMode  string
+// RedisConfig holds Redis configuration
+type RedisConfig struct {
+	Host     string
+	Port     int
+	Password string
+	DB       int
+}
+}
+
 // ChainConfig holds configuration for each blockchain
 type ChainConfig struct {
-	RpcEndpoint string
-	ApiKey      string
-	RateLimit   float64
+	RpcEndpoint     string
+	ApiKey          string
+	RateLimit       float64
+	ExplorerBaseURL string
 }
 
 // Load loads configuration from environment variables
@@ -58,26 +77,51 @@ func Load() (*Config, error) {
 			BatchSize:     getEnvAsInt("KAFKA_BATCH_SIZE", 10),
 			BatchTimeout:  time.Duration(getEnvAsInt("KAFKA_BATCH_TIMEOUT", 5)) * time.Second,
 		},
+		Database: DatabaseConfig{
+			Host:     getEnv("DB_HOST", "localhost"),
+			Port:     getEnvAsInt("DB_PORT", 5432),
+			User:     getEnv("DB_USER", "postgres"),
+			Password: getEnv("DB_PASSWORD", ""),
+			DBName:   getEnv("DB_NAME", "blockchain_monitor"),
+			SSLMode:  getEnv("DB_SSLMODE", "disable"),
+		},
 		Chains: make(map[models.BlockchainName]ChainConfig),
 	}
 
 	// Load chain configurations
 	config.Chains[models.Bitcoin] = ChainConfig{
-		RpcEndpoint: getEnv("BITCOIN_RPC_ENDPOINT", "https://svc.blockdaemon.com/bitcoin/mainnet/native"),
-		ApiKey:      getEnv("BITCOIN_API_KEY", ""),
-		RateLimit:   getEnvAsFloat("BITCOIN_RATE_LIMIT", 4),
+		RpcEndpoint:     getEnv("BITCOIN_RPC_ENDPOINT", "https://svc.blockdaemon.com/bitcoin/mainnet/native"),
+		ApiKey:          getEnv("BITCOIN_API_KEY", ""),
+		RateLimit:       getEnvAsFloat("BITCOIN_RATE_LIMIT", 4),
+		ExplorerBaseURL: "https://blockchain.com/tx",
 	}
 
 	config.Chains[models.Ethereum] = ChainConfig{
-		RpcEndpoint: getEnv("ETHEREUM_RPC_ENDPOINT", "https://svc.blockdaemon.com/ethereum/mainnet/native"),
-		ApiKey:      getEnv("ETHEREUM_API_KEY", ""),
-		RateLimit:   getEnvAsFloat("ETHEREUM_RATE_LIMIT", 4),
+		RpcEndpoint:     getEnv("ETHEREUM_RPC_ENDPOINT", "https://svc.blockdaemon.com/ethereum/mainnet/native"),
+		ApiKey:          getEnv("ETHEREUM_API_KEY", ""),
+		RateLimit:       getEnvAsFloat("ETHEREUM_RATE_LIMIT", 4),
+		ExplorerBaseURL: "https://etherscan.io/tx",
 	}
 
 	config.Chains[models.Solana] = ChainConfig{
-		RpcEndpoint: getEnv("SOLANA_RPC_ENDPOINT", "https://svc.blockdaemon.com/solana/mainnet/native"),
-		ApiKey:      getEnv("SOLANA_API_KEY", ""),
-		RateLimit:   getEnvAsFloat("SOLANA_RATE_LIMIT", 4),
+		RpcEndpoint:     getEnv("SOLANA_RPC_ENDPOINT", "https://svc.blockdaemon.com/solana/mainnet/native"),
+		ApiKey:          getEnv("SOLANA_API_KEY", ""),
+		RateLimit:       getEnvAsFloat("SOLANA_RATE_LIMIT", 4),
+		ExplorerBaseURL: "https://solscan.io/tx",
+	}
+
+	config.Chains[models.Polygon] = ChainConfig{
+		RpcEndpoint:     getEnv("POLYGON_RPC_ENDPOINT", "https://svc.blockdaemon.com/polygon/mainnet/native"),
+		ApiKey:          getEnv("POLYGON_API_KEY", ""),
+		RateLimit:       getEnvAsFloat("POLYGON_RATE_LIMIT", 4),
+		ExplorerBaseURL: "https://polygonscan.com/tx",
+	}
+
+	config.Chains[models.BSC] = ChainConfig{
+		RpcEndpoint:     getEnv("BSC_RPC_ENDPOINT", "https://svc.blockdaemon.com/bnb/mainnet/native"),
+		ApiKey:          getEnv("BSC_API_KEY", ""),
+		RateLimit:       getEnvAsFloat("BSC_RATE_LIMIT", 4),
+		ExplorerBaseURL: "https://bscscan.com/tx",
 	}
 
 	return config, nil

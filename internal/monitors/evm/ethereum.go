@@ -319,7 +319,7 @@ func (e *EthereumMonitor) processTransaction(tx EthereumTransaction, from, to st
 }
 
 func (e *EthereumMonitor) GetExplorerURL(txHash string) string {
-	return fmt.Sprintf("https://etherscan.io/tx/%s", txHash)
+	return fmt.Sprintf("%s%s", e.ExplorerBaseURL, txHash)
 }
 
 func parseHexToUint64(hex string) (uint64, error) {

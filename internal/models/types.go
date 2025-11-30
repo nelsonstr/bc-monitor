@@ -1,7 +1,6 @@
 package models
 
 import (
-	"math/big"
 	"time"
 )
 
@@ -14,8 +13,8 @@ type User struct {
 type TransactionEvent struct {
 	From        string
 	To          string
-	Amount      *big.Float
-	Fees        *big.Float
+	Amount      string
+	Fees        string
 	Chain       BlockchainName
 	TxHash      string
 	Timestamp   time.Time

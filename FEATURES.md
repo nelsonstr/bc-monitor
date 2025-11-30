@@ -6,6 +6,8 @@ The bc-monitor application provides comprehensive blockchain transaction monitor
 
 - **Bitcoin Monitoring**: Tracks transactions on the Bitcoin network using RPC polling every minute
 - **Ethereum Monitoring**: Monitors Ethereum (EVM-compatible) transactions with 10-second polling intervals
+- **Polygon Monitoring**: Monitors Polygon (EVM-compatible) transactions with 10-second polling intervals
+- **BSC Monitoring**: Monitors Binance Smart Chain (EVM-compatible) transactions with 10-second polling intervals
 - **Solana Monitoring**: Real-time transaction tracking using WebSocket subscriptions for account changes
 
 ## Real-Time Monitoring
@@ -63,6 +65,20 @@ The bc-monitor application provides comprehensive blockchain transaction monitor
 - **Configurable Log Levels**: Debug, info, warn, error, and fatal levels
 - **Detailed Transaction Logging**: Logs all transaction details for monitoring and debugging
 
+## Data Persistence
+
+- **PostgreSQL Integration**: Stores monitored addresses and transaction history in a relational database
+- **Address Management**: Persistent storage of wallet addresses with metadata and monitoring status
+- **Transaction Archiving**: Comprehensive storage of transaction data including amounts, fees, timestamps, and blockchain details
+- **Query Capabilities**: Efficient retrieval of historical transaction data for analysis and reporting
+
+## Scalability Enhancements
+
+- **Redis-Based Coordination**: Distributed coordination using Redis for managing multiple monitor instances
+- **Instance Synchronization**: Ensures consistent monitoring across horizontally scaled deployments
+- **Load Distribution**: Automatic distribution of monitoring tasks across available instances
+- **Fault Tolerance**: Graceful handling of instance failures with automatic redistribution of workloads
+
 ## Resilience Features
 
 - **Block Reorganization Handling**: Detects and handles blockchain reorganizations (orphaned blocks)
@@ -78,7 +94,6 @@ The bc-monitor application provides comprehensive blockchain transaction monitor
 
 ## Future Enhancements
 
-- **Data Persistence**: Database storage for wallets, balances, and transaction history
 - **Prometheus Metrics**: Comprehensive monitoring and alerting capabilities
 - **Unit Test Coverage**: Extensive test suite for reliability assurance
 - **Load Testing**: Performance validation under high transaction volumes
