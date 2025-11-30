@@ -18,24 +18,12 @@ var _ interfaces.BlockchainMonitor = (*EthereumMonitor)(nil)
 
 type EthereumMonitor struct {
 	*monitors.BaseMonitor
-	latestBlock uint64
+	latestBlockHeight uint64
 }
 
 func (e *EthereumMonitor) AddAddress(address string) error {
-	e.Mu.Lock()
-	defer e.Mu.Unlock()
-
 	address = strings.ToLower(address)
-
-	// Check if the address is already being monitored
-	for _, watchedAddr := range e.Addresses {
-		if watchedAddr == address {
-			return nil // Address is already being monitored
-		}
-	}
-
-	e.Addresses = append(e.Addresses, address)
-	return nil
+	return e.BaseMonitor.AddAddress(address)
 }
 
 func NewEthereumMonitor(baseMonitor *monitors.BaseMonitor) *EthereumMonitor {
@@ -47,12 +35,12 @@ func NewEthereumMonitor(baseMonitor *monitors.BaseMonitor) *EthereumMonitor {
 func (e *EthereumMonitor) Start(ctx context.Context) error {
 
 	if err := e.Initialize(); err != nil {
-		e.Logger.Fatal().Err(err).Msg("Failed to initialize Ethereum monitor")
+		e.Logger.Error().Err(err).Msg("Failed to initialize Ethereum monitor")
 		return err
 	}
 
 	if err := e.StartMonitoring(ctx); err != nil {
-		e.Logger.Fatal().Err(err).Msg("Failed to start Ethereum monitoring")
+		e.Logger.Error().Err(err).Msg("Failed to start Ethereum monitoring")
 		return err
 	}
 
@@ -74,7 +62,7 @@ func (e *EthereumMonitor) Initialize() error {
 		return fmt.Errorf("failed to get latest Ethereum block: %v", err)
 	}
 
-	e.latestBlock = latestBlock
+	e.latestBlockHeight = latestBlock
 	e.Logger.Info().
 		Uint64("blockNumber", latestBlock).
 		Msg("Connected to Ethereum node")
@@ -97,7 +85,7 @@ func (e *EthereumMonitor) StartMonitoring(ctx context.Context) error {
 		return fmt.Errorf("failed to get latest Ethereum block: %v", err)
 	}
 
-	e.latestBlock = latestBlock
+	e.latestBlockHeight = latestBlock
 
 	e.Logger.Info().
 		Int("addressCount", len(e.Addresses)). // expected 0
@@ -166,13 +154,13 @@ func (e *EthereumMonitor) monitorBlocks(ctx context.Context) {
 				continue
 			}
 
-			for blockNum := e.latestBlock + 1; blockNum <= currentBlock; blockNum++ {
+			for blockNum := e.latestBlockHeight + 1; blockNum <= currentBlock; blockNum++ {
 				if err := e.processBlock(blockNum); err != nil {
 					e.Logger.Error().Err(err).Uint64("blockNumber", blockNum).Msg("Error processing Ethereum block")
 					continue
 				}
 				e.Mu.Lock()
-				e.latestBlock = blockNum
+				e.latestBlockHeight = blockNum
 				e.Mu.Unlock()
 			}
 		}

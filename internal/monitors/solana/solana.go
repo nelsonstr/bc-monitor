@@ -21,11 +21,11 @@ var _ interfaces.BlockchainMonitor = (*SolanaMonitor)(nil)
 // Update the SolanaMonitor struct
 type SolanaMonitor struct {
 	*monitors.BaseMonitor
-	wsMu          *sync.Mutex
-	blockHead     uint64
-	wsConn        *websocket.Conn
-	subscriptions map[string]int
-	balances      map[string]*big.Int
+	wsMu              *sync.Mutex
+	latestBlockHeight uint64
+	wsConn            *websocket.Conn
+	subscriptions     map[string]int
+	balances          map[string]*big.Int
 }
 
 // Update the NewSolanaMonitor function
@@ -41,7 +41,7 @@ func NewSolanaMonitor(baseMonitor *monitors.BaseMonitor) *SolanaMonitor {
 // Update the Start method
 func (s *SolanaMonitor) Start(ctx context.Context) error {
 	if err := s.Initialize(); err != nil {
-		s.Logger.Fatal().Err(err).Msg("Failed to initialize Solana monitor")
+		s.Logger.Error().Err(err).Msg("Failed to initialize Solana monitor")
 		return err
 	}
 
@@ -74,10 +74,10 @@ func (s *SolanaMonitor) Initialize() error {
 		return fmt.Errorf("failed to connect to Solana RPC: %v", err)
 	}
 
-	s.blockHead = blockHead
+	s.latestBlockHeight = blockHead
 
 	s.Logger.Info().
-		Uint64("blockHead", s.blockHead).
+		Uint64("latestBlockHeight", s.latestBlockHeight).
 		Msg("Starting Solana monitoring")
 
 	return nil

@@ -13,8 +13,8 @@ import (
 
 type BitcoinMonitor struct {
 	*monitors.BaseMonitor
-	latestBlockHash string
-	blockHead       uint64
+	latestBlockHash   string
+	latestBlockHeight uint64
 }
 
 var _ interfaces.BlockchainMonitor = (*BitcoinMonitor)(nil)
@@ -28,7 +28,7 @@ func NewBitcoinMonitor(baseMonitor *monitors.BaseMonitor) *BitcoinMonitor {
 func (b *BitcoinMonitor) Start(ctx context.Context) error {
 
 	if err := b.Initialize(); err != nil {
-		b.Logger.Fatal().
+		b.Logger.Error().
 			Err(err).
 			Str("chain", b.GetChainName().String()).
 			Msg("Failed to initialize monitor")
@@ -36,7 +36,7 @@ func (b *BitcoinMonitor) Start(ctx context.Context) error {
 	}
 
 	if err := b.StartMonitoring(ctx); err != nil {
-		b.Logger.Fatal().
+		b.Logger.Error().
 			Err(err).
 			Str("chain", b.GetChainName().String()).
 			Msg("Failed to start monitoring")
@@ -66,7 +66,7 @@ func (b *BitcoinMonitor) Initialize() error {
 	}
 
 	b.latestBlockHash = bestBlockHash
-	b.blockHead = blockHead
+	b.latestBlockHeight = blockHead
 
 	b.Logger.Info().
 		Str("bestBlockHash", bestBlockHash).
@@ -160,7 +160,7 @@ func (b *BitcoinMonitor) monitorBlocks(ctx context.Context) {
 				b.Logger.Info().
 					Str("blockHash", currentBlockHash).
 					Msg("BTC - Updated to block")
-				b.blockHead = blockHeight
+				b.latestBlockHeight = blockHeight
 				b.Mu.Unlock()
 
 				b.Logger.Info().
@@ -302,25 +302,6 @@ func (b *BitcoinMonitor) emitTransactionEvent(tx *TransactionDetails, from, to s
 			Str("txid", tx.Txid).
 			Msg("Failed to emit event for transaction")
 	}
-}
-
-func (b *BitcoinMonitor) AddAddress(address string) error {
-	b.Logger.Info().
-		Str("address", address).
-		Msg("Adding address to watch list")
-	b.Mu.Lock()
-	defer b.Mu.Unlock()
-
-	// Check if the address is already being monitored
-	for _, watchedAddr := range b.Addresses {
-		if watchedAddr == address {
-			return nil // Address is already being monitored
-		}
-	}
-
-	b.Addresses = append(b.Addresses, address)
-
-	return nil
 }
 
 func (b *BitcoinMonitor) GetExplorerURL(txHash string) string {

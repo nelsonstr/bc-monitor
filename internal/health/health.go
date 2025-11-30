@@ -57,11 +57,14 @@ func ReadinessHandler(w http.ResponseWriter, _ *http.Request) {
 
 func RegisterMonitor(ctx context.Context, monitor interfaces.BlockchainMonitor) {
 	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			default:
+			case <-ticker.C:
 				blockhead, err := monitor.GetBlockHead()
 				if err != nil {
 					logger.GetLogger().Error().
@@ -71,7 +74,6 @@ func RegisterMonitor(ctx context.Context, monitor interfaces.BlockchainMonitor) 
 				} else {
 					updateBlockchainStatus(monitor.GetChainName().String(), blockhead)
 				}
-				time.Sleep(10 * time.Second)
 			}
 		}
 	}()

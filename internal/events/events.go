@@ -34,8 +34,8 @@ func (d *GatewayEmitter) EmitEvent(event models.TransactionEvent) error {
 		Str("chain", string(event.Chain)).
 		Str("source", event.From).
 		Str("destination", event.To).
-		Str("amount", event.Amount).
-		Str("fees", event.Fees).
+		Str("amount", event.Amount.String()).
+		Str("fees", event.Fees.String()).
 		Time("timestamp", event.Timestamp).
 		Str("explorer", event.ExplorerURL).
 		Msg("Transaction details -->")
@@ -48,7 +48,5 @@ func (d *GatewayEmitter) EmitEvent(event models.TransactionEvent) error {
 }
 
 func (d *GatewayEmitter) Close() error {
-	d.WrappedEmitter.Close()
-
-	return nil
+	return d.WrappedEmitter.Close()
 }

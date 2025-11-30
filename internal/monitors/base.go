@@ -32,19 +32,7 @@ type BaseMonitor struct {
 	BlockchainName models.BlockchainName
 }
 
-type CustomTransport struct {
-	Base   http.RoundTripper
-	ApiKey string
-}
-
-func (t *CustomTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	req.Header.Set("Content-Type", "application/json")
-	if t.ApiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+t.ApiKey)
-	}
-	return t.Base.RoundTrip(req)
-}
-
+// NewBaseMonitor creates a new BaseMonitor with the given parameters
 func NewBaseMonitor(blockchain models.BlockchainName, rateLimit float64, rpcEndpoint, apiKey string, logger *zerolog.Logger, emitter *events.GatewayEmitter) *BaseMonitor {
 	return &BaseMonitor{
 		Logger:         logger,
@@ -59,10 +47,25 @@ func NewBaseMonitor(blockchain models.BlockchainName, rateLimit float64, rpcEndp
 	}
 }
 
+// GetChainName returns the blockchain name
 func (b *BaseMonitor) GetChainName() models.BlockchainName {
 	return b.BlockchainName
 }
 
+type CustomTransport struct {
+	Base   http.RoundTripper
+	ApiKey string
+}
+
+func (t *CustomTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	req.Header.Set("Content-Type", "application/json")
+	if t.ApiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+t.ApiKey)
+	}
+	return t.Base.RoundTrip(req)
+}
+
+// MakeRPCCall performs an RPC call to the blockchain node with rate limiting and retries
 func (s *BaseMonitor) MakeRPCCall(method string, params []interface{}) (*models.RPCResponse, error) {
 	s.Logger.Debug().
 		Str("url", s.RpcEndpoint).
@@ -129,6 +132,7 @@ func (s *BaseMonitor) MakeRPCCall(method string, params []interface{}) (*models.
 	return &response, nil
 }
 
+// Retry executes a function with retry logic up to MaxRetries times
 func (b *BaseMonitor) Retry(fn func() error) error {
 	var err error
 	for i := 0; i < b.MaxRetries; i++ {
@@ -146,6 +150,23 @@ func (b *BaseMonitor) CloseHTTPClient() {
 	}
 }
 
+// AddAddress adds an address to the list of watched addresses if not already present
+func (b *BaseMonitor) AddAddress(address string) error {
+	b.Mu.Lock()
+	defer b.Mu.Unlock()
+
+	for _, watchedAddr := range b.Addresses {
+		if watchedAddr == address {
+			return nil // Address is already being monitored
+		}
+	}
+
+	b.Addresses = append(b.Addresses, address)
+
+	return nil
+}
+
+// IsWatchedAddress checks if an address is in the list of watched addresses
 func (b *BaseMonitor) IsWatchedAddress(address string) bool {
 	b.Mu.RLock()
 	defer b.Mu.RUnlock()
