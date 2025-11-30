@@ -41,13 +41,14 @@ type DatabaseConfig struct {
 	Password string
 	DBName   string
 	SSLMode  string
+}
+
 // RedisConfig holds Redis configuration
 type RedisConfig struct {
 	Host     string
 	Port     int
 	Password string
 	DB       int
-}
 }
 
 // ChainConfig holds configuration for each blockchain
@@ -56,6 +57,9 @@ type ChainConfig struct {
 	ApiKey          string
 	RateLimit       float64
 	ExplorerBaseURL string
+	MaxRetries      int
+	RetryDelay      time.Duration
+	HTTPTimeout     time.Duration
 }
 
 // Load loads configuration from environment variables
@@ -94,6 +98,9 @@ func Load() (*Config, error) {
 		ApiKey:          getEnv("BITCOIN_API_KEY", ""),
 		RateLimit:       getEnvAsFloat("BITCOIN_RATE_LIMIT", 4),
 		ExplorerBaseURL: "https://blockchain.com/tx",
+		MaxRetries:      getEnvAsInt("BITCOIN_MAX_RETRIES", 3),
+		RetryDelay:      time.Duration(getEnvAsInt("BITCOIN_RETRY_DELAY", 1)) * time.Second,
+		HTTPTimeout:     time.Duration(getEnvAsInt("BITCOIN_HTTP_TIMEOUT", 10)) * time.Second,
 	}
 
 	config.Chains[models.Ethereum] = ChainConfig{
@@ -101,6 +108,9 @@ func Load() (*Config, error) {
 		ApiKey:          getEnv("ETHEREUM_API_KEY", ""),
 		RateLimit:       getEnvAsFloat("ETHEREUM_RATE_LIMIT", 4),
 		ExplorerBaseURL: "https://etherscan.io/tx",
+		MaxRetries:      getEnvAsInt("ETHEREUM_MAX_RETRIES", 3),
+		RetryDelay:      time.Duration(getEnvAsInt("ETHEREUM_RETRY_DELAY", 1)) * time.Second,
+		HTTPTimeout:     time.Duration(getEnvAsInt("ETHEREUM_HTTP_TIMEOUT", 10)) * time.Second,
 	}
 
 	config.Chains[models.Solana] = ChainConfig{
@@ -108,6 +118,9 @@ func Load() (*Config, error) {
 		ApiKey:          getEnv("SOLANA_API_KEY", ""),
 		RateLimit:       getEnvAsFloat("SOLANA_RATE_LIMIT", 4),
 		ExplorerBaseURL: "https://solscan.io/tx",
+		MaxRetries:      getEnvAsInt("SOLANA_MAX_RETRIES", 3),
+		RetryDelay:      time.Duration(getEnvAsInt("SOLANA_RETRY_DELAY", 1)) * time.Second,
+		HTTPTimeout:     time.Duration(getEnvAsInt("SOLANA_HTTP_TIMEOUT", 10)) * time.Second,
 	}
 
 	config.Chains[models.Polygon] = ChainConfig{
@@ -115,6 +128,9 @@ func Load() (*Config, error) {
 		ApiKey:          getEnv("POLYGON_API_KEY", ""),
 		RateLimit:       getEnvAsFloat("POLYGON_RATE_LIMIT", 4),
 		ExplorerBaseURL: "https://polygonscan.com/tx",
+		MaxRetries:      getEnvAsInt("POLYGON_MAX_RETRIES", 3),
+		RetryDelay:      time.Duration(getEnvAsInt("POLYGON_RETRY_DELAY", 1)) * time.Second,
+		HTTPTimeout:     time.Duration(getEnvAsInt("POLYGON_HTTP_TIMEOUT", 10)) * time.Second,
 	}
 
 	config.Chains[models.BSC] = ChainConfig{
@@ -122,6 +138,9 @@ func Load() (*Config, error) {
 		ApiKey:          getEnv("BSC_API_KEY", ""),
 		RateLimit:       getEnvAsFloat("BSC_RATE_LIMIT", 4),
 		ExplorerBaseURL: "https://bscscan.com/tx",
+		MaxRetries:      getEnvAsInt("BSC_MAX_RETRIES", 3),
+		RetryDelay:      time.Duration(getEnvAsInt("BSC_RETRY_DELAY", 1)) * time.Second,
+		HTTPTimeout:     time.Duration(getEnvAsInt("BSC_HTTP_TIMEOUT", 10)) * time.Second,
 	}
 
 	return config, nil

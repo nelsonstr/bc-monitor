@@ -1,34 +1,24 @@
 package monitors
 
 import (
+	"blockchain-monitor/internal/config"
 	"blockchain-monitor/internal/events"
 	"blockchain-monitor/internal/interfaces"
 	"blockchain-monitor/internal/models"
-	"bytes"
-	"context"
-	"encoding/json"
-	"fmt"
-	"io"
-	"net/http"
+	"blockchain-monitor/internal/rpc"
 	"sync"
 	"time"
 
 	"github.com/rs/zerolog"
-	"golang.org/x/time/rate"
 )
 
 // BaseMonitor contains common fields and methods for all blockchain monitors
 type BaseMonitor struct {
-	ApiKey          string
-	RpcEndpoint     string
+	RpcClient       *rpc.Client
 	ExplorerBaseURL string
 	EventEmitter    interfaces.EventEmitter
 	Addresses       []string
-	MaxRetries      int
-	RetryDelay      time.Duration
-	RateLimiter     *rate.Limiter
 	Mu              sync.RWMutex
-	Client          *http.Client
 	Logger          *zerolog.Logger
 	BlockchainName  models.BlockchainName
 }
