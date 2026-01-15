@@ -1,6 +1,7 @@
 package solana
 
 import (
+	"blockchain-monitor/internal/database"
 	"blockchain-monitor/internal/interfaces"
 	"blockchain-monitor/internal/models"
 	"blockchain-monitor/internal/monitors"
@@ -9,7 +10,7 @@ import (
 	"fmt"
 	"math/big"
 	"net/http"
-	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,6 +27,7 @@ type SolanaMonitor struct {
 	wsConn            *websocket.Conn
 	subscriptions     map[string]int
 	balances          map[string]*big.Int
+	wsURL             string
 }
 
 // Update the NewSolanaMonitor function
@@ -49,17 +51,29 @@ func (s *SolanaMonitor) Start(ctx context.Context) error {
 }
 
 func (s *SolanaMonitor) Initialize() error {
-	wsURL := os.Getenv("SOLANA_WSS_ENDPOINT")
+	s.balances = make(map[string]*big.Int)
 
-	dialer := websocket.Dialer{
-		HandshakeTimeout: 10 * time.Second,
-	}
-	c, _, err := dialer.Dial(wsURL, nil)
+	// Load last scanned block from database
+	state, err := database.GetBlockchainState(s.GetChainName().String())
 	if err != nil {
-		return fmt.Errorf("failed to connect to Solana WebSocket: %v", err)
+		s.Logger.Error().Err(err).Msg("Failed to get blockchain state from DB")
 	}
 
-	s.wsConn = c
+	if state != nil {
+		s.latestBlockHeight = state.LastBlockHeight
+		s.Logger.Info().
+			Uint64("slot", s.latestBlockHeight).
+			Msg("Resuming Solana monitoring from DB state")
+	} else {
+		latestSlot, err := s.GetBlockHead()
+		if err != nil {
+			return fmt.Errorf("failed to get latest Solana slot: %v", err)
+		}
+		s.latestBlockHeight = latestSlot
+		s.Logger.Info().
+			Uint64("slot", latestSlot).
+			Msg("Starting Solana monitoring from current head")
+	}
 
 	s.Client = &http.Client{
 		Timeout: 30 * time.Second,
@@ -69,16 +83,29 @@ func (s *SolanaMonitor) Initialize() error {
 		},
 	}
 
-	blockHead, err := s.GetBlockHead()
-	if err != nil {
-		return fmt.Errorf("failed to connect to Solana RPC: %v", err)
+	// Build WebSocket URL
+	rpcURL := s.RpcEndpoint
+	if s.ApiKey != "" {
+		if strings.Contains(rpcURL, "?") {
+			rpcURL += "&api-key=" + s.ApiKey
+		} else {
+			rpcURL += "?api-key=" + s.ApiKey
+		}
 	}
 
-	s.latestBlockHeight = blockHead
+	wsURL := strings.Replace(rpcURL, "https://", "wss://", 1)
+	wsURL = strings.Replace(wsURL, "http://", "ws://", 1)
 
-	s.Logger.Info().
-		Uint64("latestBlockHeight", s.latestBlockHeight).
-		Msg("Starting Solana monitoring")
+	s.wsURL = wsURL
+	// Establish initial WebSocket connection
+	dialer := websocket.Dialer{
+		HandshakeTimeout: 10 * time.Second,
+	}
+	c, _, err := dialer.Dial(wsURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to connect to Solana WebSocket at %s: %v", wsURL, err)
+	}
+	s.wsConn = c
 
 	return nil
 }
@@ -251,7 +278,16 @@ func (s *SolanaMonitor) processAccountChange(change AccountChange) {
 	if newBalance.Cmp(oldBalance) != 0 {
 		balanceChange := new(big.Int).Sub(newBalance, oldBalance)
 		s.balances[address] = newBalance
-		txDetails, err := s.getRecentTransactionDetails(address, change.Params.Context.Slot)
+
+		// Update state in DB and cache
+		slot := change.Params.Context.Slot
+		if err := database.UpdateBlockchainState(s.GetChainName().String(), slot, ""); err != nil {
+			s.Logger.Error().Err(err).Uint64("slot", slot).Msg("Failed to update blockchain state in DB")
+		}
+		// Note: latestBlockHeight update is done without re-acquiring lock since we already hold it from line 257
+		s.latestBlockHeight = slot
+
+		txDetails, err := s.getRecentTransactionDetails(address, slot)
 		if err != nil {
 			s.Logger.Error().Err(err).Msg("Error fetching transaction details")
 		}
@@ -268,6 +304,11 @@ func (s *SolanaMonitor) processAccountChange(change AccountChange) {
 			TxHash:      txDetails.TxHash,
 			Timestamp:   txDetails.Timestamp,
 			ExplorerURL: s.GetExplorerURL(txDetails.TxHash),
+		}
+
+		// Save transaction to DB
+		if err := database.SaveTransaction(event); err != nil {
+			s.Logger.Error().Err(err).Str("txHash", txDetails.TxHash).Msg("Failed to save transaction to DB")
 		}
 
 		s.Logger.Info().
@@ -314,29 +355,6 @@ func (s *SolanaMonitor) GetExplorerURL(txHash string) string {
 	return fmt.Sprintf("https://solscan.io/tx/%s", txHash)
 }
 
-func (s *SolanaMonitor) getBlock(slot uint64) ([]SolanaTransaction, error) {
-	resp, err := s.MakeRPCCall("getBlock", []interface{}{
-		slot,
-		map[string]interface{}{
-			"encoding":                       "json",
-			"maxSupportedTransactionVersion": 0,
-			"transactionDetails":             "full",
-			"rewards":                        false,
-		},
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	var blockResp struct {
-		Transactions []SolanaTransaction `json:"transactions"`
-	}
-	if err := json.Unmarshal(resp.Result, &blockResp); err != nil {
-		return nil, err
-	}
-
-	return blockResp.Transactions, nil
-}
 
 func (s *SolanaMonitor) GetBlockHead() (uint64, error) {
 	resp, err := s.MakeRPCCall("getSlot", nil)
@@ -469,8 +487,8 @@ func (s *SolanaMonitor) getRecentTransactionDetails(address string, slot uint64)
 		To:        to,
 		Amount:    float64(amount) / 1e9,
 		Fees:      float64(actualFee) / 1e9,
-		TxHash:    signaturesResp[0].Signature,
-		Timestamp: time.Unix(signaturesResp[0].BlockTime, 0),
+		TxHash:    signaturesResp[slotSignaturesIndex].Signature,
+		Timestamp: time.Unix(signaturesResp[slotSignaturesIndex].BlockTime, 0),
 	}, nil
 }
 

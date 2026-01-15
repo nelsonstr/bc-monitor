@@ -4,6 +4,7 @@ import (
 	"blockchain-monitor/internal/config"
 	"database/sql"
 	"fmt"
+	"time"
 
 	"embed"
 	"errors"
@@ -33,6 +34,11 @@ func InitDB(cfg config.DatabaseConfig) error {
 	if err = DB.Ping(); err != nil {
 		return fmt.Errorf("failed to ping database: %v", err)
 	}
+
+	// Configure connection pool for better performance
+	DB.SetMaxOpenConns(25)
+	DB.SetMaxIdleConns(10)
+	DB.SetConnMaxLifetime(5 * time.Minute)
 
 	return nil
 }

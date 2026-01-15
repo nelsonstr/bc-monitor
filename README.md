@@ -197,7 +197,7 @@ http://127.0.0.1:8888/healthz
 ## build
 
 ```shell
-go build ./cmd/
+go build ./cmd/ -o cmd
 ```
 
 
@@ -285,3 +285,4 @@ You can use any RPC provider you want. If you need an example or reference
 [RPC bitcoin](https://docs.blockdaemon.com/reference/how-to-access-bitcoin-api)
 
 
+ 

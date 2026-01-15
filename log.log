@@ -1,0 +1,1 @@
+{"level":"fatal","error":"failed to ping database: dial tcp [::1]:5432: connect: connection refused","time":1768503867,"caller":"/Users/nelson/data/nelson.labs/bc-monitor-1/cmd/main.go:37","message":"Failed to initialize database"}

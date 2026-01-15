@@ -1,26 +1,36 @@
 package monitors
 
 import (
-	"blockchain-monitor/internal/config"
 	"blockchain-monitor/internal/events"
 	"blockchain-monitor/internal/interfaces"
 	"blockchain-monitor/internal/models"
-	"blockchain-monitor/internal/rpc"
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
 	"sync"
 	"time"
 
 	"github.com/rs/zerolog"
+	"golang.org/x/time/rate"
 )
 
 // BaseMonitor contains common fields and methods for all blockchain monitors
 type BaseMonitor struct {
-	RpcClient       *rpc.Client
+	Client          *http.Client
+	RpcEndpoint     string
+	ApiKey          string
 	ExplorerBaseURL string
 	EventEmitter    interfaces.EventEmitter
 	Addresses       []string
 	Mu              sync.RWMutex
 	Logger          *zerolog.Logger
 	BlockchainName  models.BlockchainName
+	RateLimiter     *rate.Limiter
+	MaxRetries      int
+	RetryDelay      time.Duration
 }
 
 // NewBaseMonitor creates a new BaseMonitor with the given parameters
@@ -32,7 +42,7 @@ func NewBaseMonitor(blockchain models.BlockchainName, rateLimit float64, rpcEndp
 		ApiKey:          apiKey,
 		ExplorerBaseURL: explorerBaseURL,
 		RateLimiter:     rate.NewLimiter(rate.Limit(rateLimit), 1),
-		MaxRetries:      1,
+		MaxRetries:      3,
 		RetryDelay:      time.Second,
 		EventEmitter:    emitter,
 		BlockchainName:  blockchain,
@@ -83,13 +93,15 @@ func (s *BaseMonitor) MakeRPCCall(method string, params []interface{}) (*models.
 		return nil, fmt.Errorf("failed to marshal request: %v", err)
 	}
 
-	req, err := http.NewRequest("POST", s.RpcEndpoint, bytes.NewReader(payload))
-	if err != nil {
-		return nil, err
-	}
-
 	var response models.RPCResponse
 	err = s.Retry(func() error {
+		// Create a new request for each retry attempt
+		// HTTP requests cannot be reused after first use
+		req, err := http.NewRequest("POST", s.RpcEndpoint, bytes.NewReader(payload))
+		if err != nil {
+			return err
+		}
+
 		resp, err := s.Client.Do(req)
 		if err != nil {
 			return err
@@ -124,14 +136,18 @@ func (s *BaseMonitor) MakeRPCCall(method string, params []interface{}) (*models.
 	return &response, nil
 }
 
-// Retry executes a function with retry logic up to MaxRetries times
+// Retry executes a function with exponential backoff retry logic up to MaxRetries times
 func (b *BaseMonitor) Retry(fn func() error) error {
 	var err error
+	delay := b.RetryDelay
 	for i := 0; i < b.MaxRetries; i++ {
 		if err = fn(); err == nil {
 			return nil
 		}
-		time.Sleep(b.RetryDelay)
+		if i < b.MaxRetries-1 { // Don't sleep after last attempt
+			time.Sleep(delay)
+			delay *= 2 // Exponential backoff
+		}
 	}
 	return err
 }

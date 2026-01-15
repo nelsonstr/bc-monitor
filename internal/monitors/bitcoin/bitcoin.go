@@ -1,6 +1,7 @@
 package bitcoin
 
 import (
+	"blockchain-monitor/internal/database"
 	"blockchain-monitor/internal/interfaces"
 	"blockchain-monitor/internal/models"
 	"blockchain-monitor/internal/monitors"
@@ -55,51 +56,106 @@ func (b *BitcoinMonitor) Initialize() error {
 		},
 	}
 
-	bestBlockHash, err := b.getBestBlockHash()
+	// Load last scanned block from database
+	state, err := database.GetBlockchainState(b.GetChainName().String())
 	if err != nil {
-		return fmt.Errorf("failed to connect to Bitcoin node: %v", err)
+		b.Logger.Error().Err(err).Msg("Failed to get blockchain state from DB")
 	}
 
-	blockHead, err := b.GetBlockHead()
-	if err != nil {
-		return fmt.Errorf("failed to get latest block height: %v", err)
+	if state != nil {
+		b.latestBlockHeight = state.LastBlockHeight
+		b.latestBlockHash = state.LastBlockHash
+		b.Logger.Info().
+			Uint64("blockNumber", b.latestBlockHeight).
+			Msg("Resuming Bitcoin monitoring from DB state")
+	} else {
+		bestBlockHash, err := b.getBestBlockHash()
+		if err != nil {
+			return fmt.Errorf("failed to connect to Bitcoin node: %v", err)
+		}
+
+		blockHead, err := b.GetBlockHead()
+		if err != nil {
+			return fmt.Errorf("failed to get latest block height: %v", err)
+		}
+
+		b.latestBlockHash = bestBlockHash
+		b.latestBlockHeight = blockHead
+
+		b.Logger.Info().
+			Str("bestBlockHash", bestBlockHash).
+			Uint64("blockNumber", blockHead).
+			Msg("Connected to Bitcoin node")
 	}
-
-	b.latestBlockHash = bestBlockHash
-	b.latestBlockHeight = blockHead
-
-	b.Logger.Info().
-		Str("bestBlockHash", bestBlockHash).
-		Uint64("blockNumber", blockHead).
-		Msg("Connected to Bitcoin node")
 
 	return nil
-}
-
-func (b *BitcoinMonitor) getBestBlockHash() (string, error) {
-	resp, err := b.MakeRPCCall("getbestblockhash", nil)
-	if err != nil {
-		return "", err
-	}
-
-	var blockHash string
-	if err := json.Unmarshal(resp.Result, &blockHash); err != nil {
-		return "", err
-	}
-
-	return blockHash, nil
 }
 
 func (b *BitcoinMonitor) StartMonitoring(ctx context.Context) error {
 	b.Logger.Info().
 		Str("chain", b.GetChainName().String()).
-		Msg("Starting monitoring")
+		Uint64("blockNumber", b.latestBlockHeight).
+		Msg("Starting Bitcoin monitoring loop")
 
 	go b.monitorBlocks(ctx)
 
 	return nil
 }
 
+func (b *BitcoinMonitor) monitorBlocks(ctx context.Context) {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			b.Logger.Info().
+				Str("chain", b.GetChainName().String()).
+				Msg("Shutting down")
+			return
+
+		case <-ticker.C:
+			currentHeight, err := b.GetBlockHead()
+			if err != nil {
+				b.Logger.Error().Err(err).Msg("Failed to get current Bitcoin block height")
+				continue
+			}
+
+			if currentHeight <= b.latestBlockHeight {
+				continue
+			}
+
+			for height := b.latestBlockHeight + 1; height <= currentHeight; height++ {
+				blockHash, err := b.getBlockHash(height)
+				if err != nil {
+					b.Logger.Error().Err(err).Uint64("height", height).Msg("Failed to get block hash")
+					break
+				}
+
+				processedHeight, err := b.processBlock(blockHash)
+				if err != nil {
+					b.Logger.Error().Err(err).Str("blockHash", blockHash).Msg("Error processing Bitcoin block")
+					break
+				}
+
+				// Update state in DB and cache
+				if err := database.UpdateBlockchainState(b.GetChainName().String(), processedHeight, blockHash); err != nil {
+					b.Logger.Error().Err(err).Uint64("height", processedHeight).Msg("Failed to update blockchain state in DB")
+				}
+
+				b.Mu.Lock()
+				b.latestBlockHeight = processedHeight
+				b.latestBlockHash = blockHash
+				b.Mu.Unlock()
+
+				b.Logger.Info().
+					Str("blockHash", blockHash).
+					Uint64("blockHeight", processedHeight).
+					Msg("BTC - Updated to block")
+			}
+		}
+	}
+}
 func (b *BitcoinMonitor) GetBlockHead() (uint64, error) {
 	result, err := b.MakeRPCCall("getblockcount", nil)
 	if err != nil {
@@ -118,58 +174,30 @@ func (b *BitcoinMonitor) GetBlockHead() (uint64, error) {
 	return height, nil
 }
 
-func (b *BitcoinMonitor) monitorBlocks(ctx context.Context) {
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			b.Logger.Info().
-				Str("chain", b.GetChainName().String()).
-				Msg("Shutting down")
-			return
-
-		case <-ticker.C:
-			currentBlockHash, err := b.getBestBlockHash()
-			if err != nil {
-				b.Logger.Error().
-					Err(err).
-					Msg("Failed to get current Bitcoin block hash")
-				continue
-			}
-			b.Logger.Debug().Str("currentBlockHash", currentBlockHash).
-				Str("bestBlockHash", b.latestBlockHash).
-				Msg("BTC")
-
-			if currentBlockHash != b.latestBlockHash {
-				b.Logger.Debug().Str("currentBlockHash", currentBlockHash).
-					Str("bestBlockHash", b.latestBlockHash).
-					Msg("BTC new block")
-				blockHeight, err := b.processBlock(currentBlockHash)
-				if err != nil {
-					b.Logger.Error().
-						Err(err).
-						Str("blockHash", currentBlockHash).
-						Msg("BTC - Error processing block")
-					continue
-				}
-
-				b.Mu.Lock()
-				b.latestBlockHash = currentBlockHash
-				b.Logger.Info().
-					Str("blockHash", currentBlockHash).
-					Msg("BTC - Updated to block")
-				b.latestBlockHeight = blockHeight
-				b.Mu.Unlock()
-
-				b.Logger.Info().
-					Str("blockHash", currentBlockHash).
-					Uint64("blockHeight", blockHeight).
-					Msg("BTC - Updated to block")
-			}
-		}
+func (b *BitcoinMonitor) getBestBlockHash() (string, error) {
+	resp, err := b.MakeRPCCall("getbestblockhash", nil)
+	if err != nil {
+		return "", err
 	}
+
+	var blockHash string
+	if err := json.Unmarshal(resp.Result, &blockHash); err != nil {
+		return "", err
+	}
+
+	return blockHash, nil
+}
+
+func (b *BitcoinMonitor) getBlockHash(height uint64) (string, error) {
+	resp, err := b.MakeRPCCall("getblockhash", []interface{}{height})
+	if err != nil {
+		return "", err
+	}
+	var blockHash string
+	if err := json.Unmarshal(resp.Result, &blockHash); err != nil {
+		return "", err
+	}
+	return blockHash, nil
 }
 
 func (b *BitcoinMonitor) processBlock(blockHash string) (uint64, error) {
@@ -294,6 +322,11 @@ func (b *BitcoinMonitor) emitTransactionEvent(tx *TransactionDetails, from, to s
 		TxHash:      tx.Txid,
 		Timestamp:   time.Unix(tx.Time, 0),
 		ExplorerURL: b.GetExplorerURL(tx.Txid),
+	}
+
+	// Save transaction to DB
+	if err := database.SaveTransaction(event); err != nil {
+		b.Logger.Error().Err(err).Str("txHash", tx.Txid).Msg("Failed to save transaction to DB")
 	}
 
 	if err := b.EventEmitter.EmitEvent(event); err != nil {

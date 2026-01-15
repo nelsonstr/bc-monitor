@@ -3,6 +3,7 @@ package database
 import (
 	"blockchain-monitor/internal/models"
 	"database/sql"
+	"errors"
 	"time"
 )
 
@@ -68,7 +69,7 @@ func AddWatchedAddress(userID, address string, blockchain models.BlockchainName)
 }
 
 // GetWatchedAddresses retrieves watched addresses for a user
-func GetWatchedAddresses(userID string) ([]WatchedAddress, error) {
+func GetWatchedAddresses(userID string) (addresses []WatchedAddress, err error) {
 	rows, err := DB.Query(`
 		SELECT id, user_id, address, blockchain, created_at
 		FROM watched_addresses
@@ -78,18 +79,23 @@ func GetWatchedAddresses(userID string) ([]WatchedAddress, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
 
-	var addresses []WatchedAddress
 	for rows.Next() {
 		var wa WatchedAddress
-		err := rows.Scan(&wa.ID, &wa.UserID, &wa.Address, &wa.Blockchain, &wa.CreatedAt)
-		if err != nil {
+		if err = rows.Scan(&wa.ID, &wa.UserID, &wa.Address, &wa.Blockchain, &wa.CreatedAt); err != nil {
 			return nil, err
 		}
 		addresses = append(addresses, wa)
 	}
-	return addresses, rows.Err()
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	return addresses, nil
 }
 
 // SaveTransaction saves a transaction to the database
@@ -103,7 +109,7 @@ func SaveTransaction(event models.TransactionEvent) error {
 }
 
 // GetTransactions retrieves transactions for a user (based on watched addresses)
-func GetTransactions(userID string, limit, offset int) ([]Transaction, error) {
+func GetTransactions(userID string, limit, offset int) (transactions []Transaction, err error) {
 	rows, err := DB.Query(`
 		SELECT t.id, t.tx_hash, t.blockchain, t.from_address, t.to_address, t.amount, t.fees, t.timestamp, t.explorer_url, t.created_at
 		FROM transactions t
@@ -115,16 +121,59 @@ func GetTransactions(userID string, limit, offset int) ([]Transaction, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		if cerr := rows.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
 
-	var transactions []Transaction
 	for rows.Next() {
 		var tx Transaction
-		err := rows.Scan(&tx.ID, &tx.TxHash, &tx.Blockchain, &tx.FromAddress, &tx.ToAddress, &tx.Amount, &tx.Fees, &tx.Timestamp, &tx.ExplorerURL, &tx.CreatedAt)
-		if err != nil {
+		if err = rows.Scan(&tx.ID, &tx.TxHash, &tx.Blockchain, &tx.FromAddress, &tx.ToAddress, &tx.Amount, &tx.Fees, &tx.Timestamp, &tx.ExplorerURL, &tx.CreatedAt); err != nil {
 			return nil, err
 		}
 		transactions = append(transactions, tx)
 	}
-	return transactions, rows.Err()
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	return transactions, err
+}
+
+// BlockchainState represents the scanned state of a blockchain
+type BlockchainState struct {
+	ChainName        string    `json:"chain_name"`
+	LastBlockHeight uint64    `json:"last_block_height"`
+	LastBlockHash   string    `json:"last_block_hash"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+// GetBlockchainState retrieves the state for a given blockchain
+func GetBlockchainState(chainName string) (*BlockchainState, error) {
+	var state BlockchainState
+	err := DB.QueryRow(`
+		SELECT chain_name, last_block_height, last_block_hash, updated_at
+		FROM blockchain_states
+		WHERE chain_name = $1
+	`, chainName).Scan(&state.ChainName, &state.LastBlockHeight, &state.LastBlockHash, &state.UpdatedAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &state, nil
+}
+
+// UpdateBlockchainState updates the state for a given blockchain
+func UpdateBlockchainState(chainName string, height uint64, hash string) error {
+	_, err := DB.Exec(`
+		INSERT INTO blockchain_states (chain_name, last_block_height, last_block_hash)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (chain_name) DO UPDATE SET
+			last_block_height = EXCLUDED.last_block_height,
+			last_block_hash = EXCLUDED.last_block_hash,
+			updated_at = EXCLUDED.updated_at
+	`, chainName, height, hash)
+	return err
 }

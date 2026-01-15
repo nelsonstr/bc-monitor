@@ -1,6 +1,7 @@
 package evm
 
 import (
+	"blockchain-monitor/internal/database"
 	"blockchain-monitor/internal/interfaces"
 	"blockchain-monitor/internal/models"
 	"blockchain-monitor/internal/monitors"
@@ -56,16 +57,28 @@ func (e *EthereumMonitor) Initialize() error {
 		},
 	}
 
-	// connect to Ethereum node get last block number
-	latestBlock, err := e.GetBlockHead()
+	// Load last scanned block from database
+	state, err := database.GetBlockchainState(e.GetChainName().String())
 	if err != nil {
-		return fmt.Errorf("failed to get latest Ethereum block: %v", err)
+		e.Logger.Error().Err(err).Msg("Failed to get blockchain state from DB")
 	}
 
-	e.latestBlockHeight = latestBlock
-	e.Logger.Info().
-		Uint64("blockNumber", latestBlock).
-		Msg("Connected to Ethereum node")
+	if state != nil {
+		e.latestBlockHeight = state.LastBlockHeight
+		e.Logger.Info().
+			Uint64("blockNumber", e.latestBlockHeight).
+			Msg("Resuming Ethereum monitoring from DB state")
+	} else {
+		// New chain, get current block head
+		latestBlock, err := e.GetBlockHead()
+		if err != nil {
+			return fmt.Errorf("failed to get latest Ethereum block: %v", err)
+		}
+		e.latestBlockHeight = latestBlock
+		e.Logger.Info().
+			Uint64("blockNumber", latestBlock).
+			Msg("Starting Ethereum monitoring from current head")
+	}
 
 	return nil
 }
@@ -80,17 +93,10 @@ func (e *EthereumMonitor) StartMonitoring(ctx context.Context) error {
 		watchAddresses[strings.ToLower(addr)] = true
 	}
 
-	latestBlock, err := e.GetBlockHead()
-	if err != nil {
-		return fmt.Errorf("failed to get latest Ethereum block: %v", err)
-	}
-
-	e.latestBlockHeight = latestBlock
-
 	e.Logger.Info().
-		Int("addressCount", len(e.Addresses)). // expected 0
-		Uint64("blockNumber", latestBlock).
-		Msg("Starting Ethereum monitoring")
+		Int("addressCount", len(e.Addresses)).
+		Uint64("blockNumber", e.latestBlockHeight).
+		Msg("Starting Ethereum monitoring loop")
 
 	go e.monitorBlocks(ctx)
 
@@ -112,31 +118,6 @@ func (e *EthereumMonitor) GetBlockHead() (uint64, error) {
 	return parseHexToUint64(blockNumberHex)
 }
 
-func (e *EthereumMonitor) getBalance(address string) (*big.Int, uint64, error) {
-	params := []interface{}{address, "latest"}
-	result, err := e.MakeRPCCall("eth_getBalance", params)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	var balanceHex string
-	if err := json.Unmarshal(result.Result, &balanceHex); err != nil {
-		e.Logger.Error().Err(err).Msg("Error parsing response")
-		return nil, 0, err
-	}
-
-	balance, ok := new(big.Int).SetString(balanceHex[2:], 16)
-	if !ok {
-		return nil, 0, fmt.Errorf("failed to parse balance")
-	}
-
-	blockNumber, err := e.GetBlockHead()
-	if err != nil {
-		return nil, 0, err
-	}
-
-	return balance, blockNumber, nil
-}
 
 func (e *EthereumMonitor) monitorBlocks(ctx context.Context) {
 	ticker := time.NewTicker(10 * time.Second)
@@ -155,10 +136,21 @@ func (e *EthereumMonitor) monitorBlocks(ctx context.Context) {
 			}
 
 			for blockNum := e.latestBlockHeight + 1; blockNum <= currentBlock; blockNum++ {
-				if err := e.processBlock(blockNum); err != nil {
-					e.Logger.Error().Err(err).Uint64("blockNumber", blockNum).Msg("Error processing Ethereum block")
-					continue
+				blockDetails, err := e.fetchBlockWithRetry(blockNum, 3)
+				if err != nil {
+					e.Logger.Error().Err(err).Uint64("blockNumber", blockNum).Msg("Failed to fetch Ethereum block after retries")
+					break
 				}
+
+				if err := e.processFetchedBlock(blockNum, blockDetails); err != nil {
+					e.Logger.Error().Err(err).Uint64("blockNumber", blockNum).Msg("Error processing Ethereum block")
+				}
+
+				// Update state in DB and cache
+				if err := database.UpdateBlockchainState(e.GetChainName().String(), blockNum, blockDetails.Hash); err != nil {
+					e.Logger.Error().Err(err).Uint64("blockNumber", blockNum).Msg("Failed to update blockchain state in DB")
+				}
+
 				e.Mu.Lock()
 				e.latestBlockHeight = blockNum
 				e.Mu.Unlock()
@@ -167,55 +159,49 @@ func (e *EthereumMonitor) monitorBlocks(ctx context.Context) {
 	}
 }
 
-func (e *EthereumMonitor) processBlock(blockNum uint64) error {
-	params := []interface{}{fmt.Sprintf("0x%x", blockNum), true}
-	result, err := e.MakeRPCCall("eth_getBlockByNumber", params)
-	if err != nil {
-		return err
-	}
-
+func (e *EthereumMonitor) fetchBlockWithRetry(blockNum uint64, retries int) (*EthereumBlockDetails, error) {
 	var blockDetails EthereumBlockDetails
-	if err := json.Unmarshal(result.Result, &blockDetails); err != nil {
-		return fmt.Errorf("failed to parse block details: %w", err)
+	err := e.Retry(func() error {
+		params := []interface{}{fmt.Sprintf("0x%x", blockNum), true}
+		result, err := e.MakeRPCCall("eth_getBlockByNumber", params)
+		if err != nil {
+			return err
+		}
+		if result.Result == nil {
+			return fmt.Errorf("block %d not found yet", blockNum)
+		}
+		return json.Unmarshal(result.Result, &blockDetails)
+	})
+	if err != nil {
+		return nil, err
 	}
+	return &blockDetails, nil
+}
 
+func (e *EthereumMonitor) processFetchedBlock(blockNum uint64, blockDetails *EthereumBlockDetails) error {
 	e.Logger.Info().
 		Uint64("blockNumber", blockNum).
 		Int("transactionCount", len(blockDetails.Transactions)).
-		Int("addresses", len(e.Addresses)).
 		Msg("Processing Ethereum block")
-
-	defer e.Logger.Info().
-		Uint64("blockNumber", blockNum).
-		Msg("Finished processing Ethereum block")
-
-	if len(e.Addresses) == 0 {
-		return nil
-	}
 
 	timestamp, err := parseHexToUint64(blockDetails.Timestamp)
 	if err != nil {
 		return fmt.Errorf("failed to parse block timestamp: %w", err)
 	}
 
-	for i, tx := range blockDetails.Transactions {
+	for _, tx := range blockDetails.Transactions {
 		if err := e.processSingleTransaction(tx, timestamp, blockDetails.BaseFeePerGas); err != nil {
 			e.Logger.Warn().
 				Err(err).
-				Int("index", i).
 				Str("txHash", tx.Hash).
 				Msg("Error processing Ethereum transaction")
 			continue
 		}
-
-		e.Logger.Debug().
-			Int("index", i).
-			Str("txHash", tx.Hash).
-			Msg("Successfully processed transaction")
 	}
 
 	return nil
 }
+
 
 func (e *EthereumMonitor) processSingleTransaction(tx EthereumTransaction, blockTime uint64, baseFeePerGas string) error {
 	from := strings.ToLower(tx.From)
@@ -240,6 +226,12 @@ func (e *EthereumMonitor) processSingleTransaction(tx EthereumTransaction, block
 		return nil
 	}
 	event := e.processTransaction(tx, from, to, blockTime, baseFeePerGas)
+
+	// Save transaction to DB
+	if err := database.SaveTransaction(event); err != nil {
+		e.Logger.Error().Err(err).Str("txHash", tx.Hash).Msg("Failed to save transaction to DB")
+	}
+
 	if e.EventEmitter != nil {
 		e.Logger.Info().
 			Str("from", from).

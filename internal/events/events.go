@@ -1,8 +1,10 @@
 package events
 
 import (
+	"blockchain-monitor/internal/config"
 	"blockchain-monitor/internal/emitters"
 	"blockchain-monitor/internal/interfaces"
+	"blockchain-monitor/internal/logger"
 	"blockchain-monitor/internal/models"
 
 	"github.com/rs/zerolog"
@@ -14,6 +16,14 @@ var _ interfaces.EventEmitter = (*GatewayEmitter)(nil)
 type GatewayEmitter struct {
 	WrappedEmitter interfaces.EventEmitter
 	logger         *zerolog.Logger
+}
+
+func NewGatewayEmitter(kafkaCfg config.KafkaConfig) (*GatewayEmitter, error) {
+	kafkaEmitter := emitters.NewKafkaEmitter(kafkaCfg)
+	return &GatewayEmitter{
+		WrappedEmitter: kafkaEmitter,
+		logger:         logger.GetLogger(),
+	}, nil
 }
 
 func EventsGateway(logger *zerolog.Logger, wrappedEmitter *emitters.KafkaEmitter) *GatewayEmitter {
